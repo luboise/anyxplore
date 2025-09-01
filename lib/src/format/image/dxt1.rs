@@ -46,8 +46,8 @@ impl DXT1Block {
 
             RGBColour {
                 r: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                g: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                b: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
+                g: ((i * col_1.g as u32 + (3 - i) * col_2.g as u32) / 3) as u8,
+                b: ((i * col_1.b as u32 + (3 - i) * col_2.b as u32) / 3) as u8,
             }
         };
 
@@ -63,8 +63,8 @@ impl DXT1Block {
 
             RGBColour {
                 r: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                g: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                b: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
+                g: ((i * col_1.g as u32 + (3 - i) * col_2.g as u32) / 3) as u8,
+                b: ((i * col_1.b as u32 + (3 - i) * col_2.b as u32) / 3) as u8,
             }
         };
 
@@ -80,8 +80,8 @@ impl DXT1Block {
 
             RGBColour {
                 r: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                g: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                b: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
+                g: ((i * col_1.g as u32 + (3 - i) * col_2.g as u32) / 3) as u8,
+                b: ((i * col_1.b as u32 + (3 - i) * col_2.b as u32) / 3) as u8,
             }
         };
 
@@ -97,8 +97,8 @@ impl DXT1Block {
 
             RGBColour {
                 r: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                g: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
-                b: ((i * col_1.r as u32 + (3 - i) * col_2.r as u32) / 3) as u8,
+                g: ((i * col_1.g as u32 + (3 - i) * col_2.g as u32) / 3) as u8,
+                b: ((i * col_1.b as u32 + (3 - i) * col_2.b as u32) / 3) as u8,
             }
         };
 
@@ -111,7 +111,21 @@ impl DXT1Block {
 }
 
 impl DXT1 {
-    pub fn as_bytes(&self) -> Vec<u8> {
+    pub fn as_rgb_bytes(&self) -> Vec<u8> {
+        self.as_rgb().iter().flat_map(|c| [c.r, c.g, c.b]).collect()
+    }
+
+    pub fn as_rgba_bytes(&self) -> Vec<u8> {
+        self.as_rgb()
+            .iter()
+            .flat_map(|c| [c.r, c.g, c.b, u8::MAX])
+            .collect()
+    }
+
+    pub fn as_rgb(&self) -> Vec<RGBColour> {
+        let blocks_x = self.height.div_ceil(4) as usize;
+        let blocks_y = self.width.div_ceil(4) as usize;
+
         let mut rgb_colours = Vec::<RGBColour>::new();
 
         let width_stride = (self.height / 4) as usize;
@@ -121,13 +135,13 @@ impl DXT1 {
         let mut vec3 = Vec::<RGBColour>::new();
         let mut vec4 = Vec::<RGBColour>::new();
 
-        for outer_row in 0..(self.width / 4) as usize {
+        for outer_row in 0..blocks_y {
             vec1.clear();
             vec2.clear();
             vec3.clear();
             vec4.clear();
 
-            for i in 0..width_stride {
+            for i in 0..blocks_x {
                 let block = &self.blocks[outer_row * width_stride + i];
 
                 vec1.extend_from_slice(&block.row_1());
@@ -141,8 +155,7 @@ impl DXT1 {
             rgb_colours.extend_from_slice(&vec3);
             rgb_colours.extend_from_slice(&vec4);
         }
-
-        rgb_colours.iter().flat_map(|c| [c.r, c.g, c.b]).collect()
+        rgb_colours
     }
 
     pub fn from_bytes(bytes: &[u8], width: u32, height: u32) -> Result<DXT1, std::io::Error> {

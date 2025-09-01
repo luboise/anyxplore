@@ -1,82 +1,116 @@
-use std::{fs::File, io::BufWriter, path::Path};
+use std::{env, fs, path::Path, sync::Arc};
 
-use anyxplore::format::image::{dxt1::DXT1, dxt2::DXT2};
+use bnl::BNLFile;
+use fltk::{
+    app::{self},
+    frame,
+    group::Scroll,
+    prelude::*,
+    tree::{self},
+    window,
+};
 
-fn main() {
-    let filename = std::env::args().nth(1).unwrap_or_default();
+mod widgets;
 
-    let image_type = std::env::args().nth(2).unwrap_or_default();
+#[derive(Copy, Clone)]
+enum Message {
+    TreeClicked,
+}
 
-    let width = std::env::args()
-        .nth(3)
-        .unwrap_or_default()
-        .parse::<u32>()
-        .unwrap_or(0);
-    let height = std::env::args()
-        .nth(4)
-        .unwrap_or_default()
-        .parse::<u32>()
-        .unwrap_or(0);
+struct AnyXPloreApp {
+    app: app::App,
 
-    if filename.is_empty() {
-        eprintln!("Unable to find input file.");
-        std::process::exit(1);
-    }
+    tree: tree::Tree,
 
-    let bytes = match std::fs::read(filename) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Unable to read file.\nError: {}", e);
+    main_win: window::Window,
+    frame: frame::Frame,
+    count: i32,
+    receiver: app::Receiver<Message>,
+}
+
+impl AnyXPloreApp {
+    pub fn new() -> Self {
+        let count = 0;
+        let app = app::App::default();
+
+        let (s, receiver) = app::channel();
+        let mut main_win = window::Window::default()
+            .with_size(400, 300)
+            .with_label("AnyXPlore");
+
+        main_win.make_resizable(true);
+
+        let frame = frame::Frame::default().with_label(&count.to_string());
+        let args: Vec<String> = env::args().collect();
+
+        if args.len() < 2 {
+            eprintln!("Not enough args.");
             std::process::exit(1);
         }
-    };
 
-    let mut use_rgba = false;
+        let bytes = fs::read(&args[1]).expect("Unable to read.");
 
-    let bytes = match image_type.to_lowercase().as_ref() {
-        "dxt1" => {
-            let dxt1 =
-                DXT1::from_bytes(bytes.as_ref(), width, height).expect("Unable to get DXT1.");
-            dxt1.as_bytes()
+        let mut tree = tree::Tree::default().with_size(300, 300);
+
+        tree.set_show_root(false);
+
+        let filename = Path::new(&args[1])
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let mut main_bnl = tree.add(&filename).unwrap();
+
+        let bnl_arc = Arc::new(BNLFile::from_bytes(&bytes).unwrap());
+        main_bnl.set_user_data(bnl_arc);
+
+        tree.emit(s, Message::TreeClicked);
+
+        main_win.add(&tree);
+
+        // let bruh = Scroll::default().with_size(1000, 1000).with_label("data");
+        // main_win.add(&bruh);
+
+        main_win.end();
+        main_win.show();
+
+        Self {
+            app,
+            tree,
+            main_win,
+            frame,
+            count,
+            receiver,
         }
-        "dxt2" => {
-            let dxt2 =
-                DXT2::from_bytes(bytes.as_ref(), width, height).expect("Unable to get DXT2.");
+    }
 
-            use_rgba = true;
+    pub fn run(mut self) {
+        while self.app.wait() {
+            if let Some(msg) = self.receiver.recv() {
+                match msg {
+                    Message::TreeClicked => {
+                        if let Some(item) = self.tree.first_selected_item() {
+                            let data: Option<Arc<BNLFile>> = unsafe { item.user_data() };
 
-            dxt2.as_rgba_bytes()
+                            match data {
+                                Some(data) => {
+                                    data.asset_descriptions().iter().for_each(|desc| {
+                                        self.tree.insert(&item, desc.name(), i32::MAX);
+                                    });
+                                }
+                                None => eprintln!("No data available."),
+                            }
+                        }
+                    }
+                }
+            }
         }
-        _ => Vec::new(),
-    };
+    }
+}
 
-    let out_path = format!("out/{}_{}.png", width, height);
-
-    let path = Path::new(&out_path);
-    let file = File::create(path).unwrap();
-    let w = &mut BufWriter::new(file);
-
-    let mut encoder = png::Encoder::new(w, width, height); // Width is 2 pixels and height is 1.
-    encoder.set_color(match use_rgba {
-        true => png::ColorType::Rgba,
-        false => png::ColorType::Rgb,
-    });
-    encoder.set_depth(png::BitDepth::Eight);
-    /*
-        encoder.set_source_gamma(png::ScaledFloat::from_scaled(45455)); // 1.0 / 2.2, scaled by 100000
-        encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2)); // 1.0 / 2.2, unscaled, but rounded
-        let source_chromaticities = png::SourceChromaticities::new(
-            // Using unscaled instantiation here
-            (0.31270, 0.32900),
-            (0.64000, 0.33000),
-            (0.30000, 0.60000),
-            (0.15000, 0.06000),
-        );
-        encoder.set_source_chromaticities(source_chromaticities);
-    */
-
-    let mut writer = encoder.write_header().unwrap();
-
-    writer.write_image_data(&bytes).unwrap();
-    writer.finish().expect("Unable to close writer.");
+fn main() {
+    let app = AnyXPloreApp::new();
+    app.run();
 }

@@ -8,3 +8,6 @@ edition = "2024"
 [dependencies]
 anyxplore = { path = "lib" }
 png = "0.17.16"
+
+bnl = { git = "https://github.com/luboise/bnl.git" }
+fltk = "1.5.13"
