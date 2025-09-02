@@ -9,5 +9,5 @@ edition = "2024"
 anyxplore = { path = "lib" }
 png = "0.17.16"
 
-bnl = { git = "https://github.com/luboise/bnl.git" }
+bnl = { path = "../ghoulies_reader" }
 fltk = "1.5.13"

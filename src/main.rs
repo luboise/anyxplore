@@ -1,14 +1,18 @@
 use std::{
-    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
 };
 
-use bnl::{BNLFile, asset::AssetDescription};
+use bnl::{
+    BNLFile,
+    asset::{AssetDescription, texture::Texture},
+    game::AssetType,
+};
 use fltk::{
     app::{self},
     frame,
-    group::Scroll,
+    group::{Flex, Scroll},
+    image::RgbImage,
     prelude::*,
     tree::{self},
     window,
@@ -39,6 +43,10 @@ struct NodeData {
 struct AnyXPloreApp {
     app: app::App,
 
+    flex: fltk::group::Flex,
+
+    image_frame: fltk::frame::Frame,
+
     tree: tree::Tree,
 
     bnl_files: Vec<BNLStruct>,
@@ -46,8 +54,9 @@ struct AnyXPloreApp {
     edit_window: Scroll,
 
     main_win: window::Window,
-    frame: frame::Frame,
+
     count: i32,
+
     receiver: app::Receiver<Message>,
 }
 
@@ -58,12 +67,11 @@ impl AnyXPloreApp {
 
         let (s, receiver) = app::channel();
         let mut main_win = window::Window::default()
-            .with_size(400, 300)
+            .with_size(1024, 768)
             .with_label("AnyXPlore");
 
         main_win.make_resizable(true);
 
-        let frame = frame::Frame::default().with_label(&count.to_string());
         let args: Vec<String> = env::args().collect();
 
         if args.len() < 2 {
@@ -71,7 +79,7 @@ impl AnyXPloreApp {
             std::process::exit(1);
         }
 
-        let mut tree = tree::Tree::default().with_size(300, 300);
+        let mut tree = tree::Tree::default();
 
         tree.set_show_root(false);
 
@@ -103,14 +111,23 @@ impl AnyXPloreApp {
             path: pb,
         }];
 
-        let scroll = fltk::group::Scroll::new(0, 0, 1000, 1000, "Edit Window");
-
         tree.emit(s, Message::TreeClicked);
 
-        main_win.add(&tree);
+        let mut scroll = fltk::group::Scroll::default().with_label("Edit Window");
 
-        // let bruh = Scroll::default().with_size(1000, 1000).with_label("data");
-        // main_win.add(&bruh);
+        scroll.show();
+
+        let image_frame = fltk::frame::Frame::default();
+
+        scroll.add(&image_frame);
+        scroll.end();
+
+        let mut flex = Flex::default().size_of_parent();
+        flex.set_type(fltk::group::FlexType::Row);
+        flex.add(&tree);
+        flex.add(&scroll);
+
+        main_win.add(&flex);
 
         main_win.end();
         main_win.show();
@@ -119,11 +136,12 @@ impl AnyXPloreApp {
             app,
             tree,
             main_win,
-            frame,
             edit_window: scroll,
             count,
             receiver,
             bnl_files,
+            flex,
+            image_frame,
         }
     }
 
@@ -133,56 +151,83 @@ impl AnyXPloreApp {
                 match msg {
                     Message::TreeClicked => {
                         if let Some(node) = self.tree.first_selected_item() {
-                            let opt_node_data: Option<NodeData> = unsafe { node.user_data() };
+                            let node_data: NodeData = match unsafe { node.user_data() } {
+                                Some(d) => d,
+                                None => {
+                                    eprintln!("No node data available.");
+                                    return;
+                                }
+                            };
 
-                            match opt_node_data {
-                                Some(node_data) => {
-                                    if node_data.is_root {
-                                        if let Some(bnl_file) =
-                                            self.bnl_files.get_mut(node_data.bnl_index)
+                            if node_data.is_root {
+                                if let Some(bnl_struct) =
+                                    self.bnl_files.get_mut(node_data.bnl_index)
+                                {
+                                    if bnl_struct.descriptions.is_none() {
+                                        println!(
+                                            "Loading asset descriptions for {}",
+                                            bnl_struct.path.display()
+                                        );
+
+                                        let descriptions = Vec::new();
+
+                                        bnl_struct.data.asset_descriptions().iter().for_each(
+                                            |desc| {
+                                                let mut new_node = self
+                                                    .tree
+                                                    .insert(&node, desc.name(), i32::MAX)
+                                                    .unwrap();
+
+                                                new_node.set_user_data(NodeData {
+                                                    is_root: false,
+                                                    bnl_index: node_data.bnl_index,
+                                                });
+                                            },
+                                        );
+
+                                        bnl_struct.descriptions = Some(descriptions);
+                                    }
+                                }
+                            } else if let Some(bnl_struct) =
+                                self.bnl_files.get_mut(node_data.bnl_index)
+                            {
+                                let asset_name = node.label().unwrap_or_default();
+
+                                if let Ok(raw) = bnl_struct.data.get_raw_asset(&asset_name) {
+                                    if raw.asset_type == AssetType::ResTexture {
+                                        if let Ok(tex) =
+                                            bnl_struct.data.get_asset::<Texture>(&asset_name)
                                         {
-                                            if bnl_file.descriptions.is_none() {
-                                                println!(
-                                                    "Loading asset descriptions for {}",
-                                                    bnl_file.path.display()
-                                                );
+                                            if let Ok(rgba) = tex.to_rgba_image() {
+                                                if let Ok(img) = unsafe {
+                                                    RgbImage::from_data(
+                                                        rgba.bytes(),
+                                                        rgba.width() as i32,
+                                                        rgba.height() as i32,
+                                                        fltk::enums::ColorDepth::Rgba8,
+                                                    )
+                                                } {
+                                                    println!("Setting image.");
 
-                                                let descriptions = Vec::new();
+                                                    self.image_frame.resize(
+                                                        self.image_frame.x(),
+                                                        self.image_frame.y(),
+                                                        img.width(),
+                                                        img.height(),
+                                                    );
 
-                                                bnl_file.data.asset_descriptions().iter().for_each(
-                                                    |desc| {
-                                                        let mut new_node = self
-                                                            .tree
-                                                            .insert(&node, desc.name(), i32::MAX)
-                                                            .unwrap();
+                                                    // self.image_frame.set_image::<RgbImage>(None);
+                                                    // self.image_frame.redraw();
 
-                                                        new_node.set_user_data(NodeData {
-                                                            is_root: false,
-                                                            bnl_index: node_data.bnl_index,
-                                                        });
-                                                    },
-                                                );
+                                                    self.image_frame.set_image(Some(img));
 
-                                                bnl_file.descriptions = Some(descriptions);
+                                                    self.image_frame.parent().unwrap().redraw();
+                                                }
                                             }
                                         }
                                     }
                                 }
-                                None => todo!(),
                             }
-
-                            /*
-                            match data {
-
-                                Some(data) => {
-                                    self.bnl_files.values().find(|val|{val.tree_id == data.id})
-                                    data.asset_descriptions().iter().for_each(|desc| {
-                                        self.tree.insert(&node, desc.name(), i32::MAX);
-                                    });
-                                }
-                                None => eprintln!("No data available."),
-                            }
-                            */
                         }
                     }
                 }
