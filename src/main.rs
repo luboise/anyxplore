@@ -1,6 +1,10 @@
-use std::{env, fs, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    env, fs,
+    path::{Path, PathBuf},
+};
 
-use bnl::BNLFile;
+use bnl::{BNLFile, asset::AssetDescription};
 use fltk::{
     app::{self},
     frame,
@@ -17,10 +21,29 @@ enum Message {
     TreeClicked,
 }
 
+struct BNLStruct {
+    tree_id: u32,
+
+    path: PathBuf,
+
+    descriptions: Option<Vec<AssetDescription>>,
+    data: BNLFile,
+}
+
+#[derive(Clone)]
+struct NodeData {
+    is_root: bool,
+    bnl_index: usize,
+}
+
 struct AnyXPloreApp {
     app: app::App,
 
     tree: tree::Tree,
+
+    bnl_files: Vec<BNLStruct>,
+
+    edit_window: Scroll,
 
     main_win: window::Window,
     frame: frame::Frame,
@@ -48,8 +71,6 @@ impl AnyXPloreApp {
             std::process::exit(1);
         }
 
-        let bytes = fs::read(&args[1]).expect("Unable to read.");
-
         let mut tree = tree::Tree::default().with_size(300, 300);
 
         tree.set_show_root(false);
@@ -61,10 +82,28 @@ impl AnyXPloreApp {
             .unwrap()
             .to_string();
 
-        let mut main_bnl = tree.add(&filename).unwrap();
+        let pb: PathBuf = args[1].clone().into();
 
-        let bnl_arc = Arc::new(BNLFile::from_bytes(&bytes).unwrap());
-        main_bnl.set_user_data(bnl_arc);
+        let bytes = fs::read(&args[1]).expect("Unable to read.");
+        let new_bnl = BNLFile::from_bytes(&bytes).unwrap();
+
+        let mut node = tree.add(&filename).unwrap();
+
+        node.set_user_data(NodeData {
+            is_root: true,
+            bnl_index: 0,
+        });
+
+        let tree_id = 0;
+
+        let bnl_files = vec![BNLStruct {
+            tree_id,
+            descriptions: None,
+            data: new_bnl,
+            path: pb,
+        }];
+
+        let scroll = fltk::group::Scroll::new(0, 0, 1000, 1000, "Edit Window");
 
         tree.emit(s, Message::TreeClicked);
 
@@ -81,8 +120,10 @@ impl AnyXPloreApp {
             tree,
             main_win,
             frame,
+            edit_window: scroll,
             count,
             receiver,
+            bnl_files,
         }
     }
 
@@ -91,17 +132,57 @@ impl AnyXPloreApp {
             if let Some(msg) = self.receiver.recv() {
                 match msg {
                     Message::TreeClicked => {
-                        if let Some(item) = self.tree.first_selected_item() {
-                            let data: Option<Arc<BNLFile>> = unsafe { item.user_data() };
+                        if let Some(node) = self.tree.first_selected_item() {
+                            let opt_node_data: Option<NodeData> = unsafe { node.user_data() };
 
+                            match opt_node_data {
+                                Some(node_data) => {
+                                    if node_data.is_root {
+                                        if let Some(bnl_file) =
+                                            self.bnl_files.get_mut(node_data.bnl_index)
+                                        {
+                                            if bnl_file.descriptions.is_none() {
+                                                println!(
+                                                    "Loading asset descriptions for {}",
+                                                    bnl_file.path.display()
+                                                );
+
+                                                let descriptions = Vec::new();
+
+                                                bnl_file.data.asset_descriptions().iter().for_each(
+                                                    |desc| {
+                                                        let mut new_node = self
+                                                            .tree
+                                                            .insert(&node, desc.name(), i32::MAX)
+                                                            .unwrap();
+
+                                                        new_node.set_user_data(NodeData {
+                                                            is_root: false,
+                                                            bnl_index: node_data.bnl_index,
+                                                        });
+                                                    },
+                                                );
+
+                                                bnl_file.descriptions = Some(descriptions);
+                                            }
+                                        }
+                                    }
+                                }
+                                None => todo!(),
+                            }
+
+                            /*
                             match data {
+
                                 Some(data) => {
+                                    self.bnl_files.values().find(|val|{val.tree_id == data.id})
                                     data.asset_descriptions().iter().for_each(|desc| {
-                                        self.tree.insert(&item, desc.name(), i32::MAX);
+                                        self.tree.insert(&node, desc.name(), i32::MAX);
                                     });
                                 }
                                 None => eprintln!("No data available."),
                             }
+                            */
                         }
                     }
                 }

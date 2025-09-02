@@ -1,3 +1,11 @@
-mod file_tree;
+/*
+pub trait Edit {
+    fn get_editor() -> Editor<Self>
+}
 
-pub use file_tree::FileTree;
+impl Edit for bnl::asset::texture::Texture {
+    fn get_editor() -> Editor<Self> {
+        todo!()
+    }
+}
+*/
