@@ -12,7 +12,7 @@ pub trait Editable: Viewable {
 impl Viewable for Texture {
     fn create_viewer<T: GroupExt>(&self, widget_parent: &mut T) {
         if let Ok(rgba) = self.to_rgba_image() {
-            if let Ok(img) = unsafe {
+            if let Ok(mut img) = unsafe {
                 RgbImage::from_data(
                     rgba.bytes(),
                     rgba.width() as i32,
@@ -22,7 +22,8 @@ impl Viewable for Texture {
             } {
                 println!("Setting image.");
 
-                let mut frame = frame::Frame::default().with_size(img.width(), img.height());
+                let mut frame = frame::Frame::default().size_of(widget_parent);
+                img.scale(frame.width(), frame.height(), true, true);
                 frame.set_image(Some(img));
 
                 widget_parent.add(&frame);
