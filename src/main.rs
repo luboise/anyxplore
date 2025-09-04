@@ -12,8 +12,8 @@ use bnl::{
 };
 use fltk::{
     app::{self},
-    frame,
-    group::{Flex, Scroll},
+    button, frame,
+    group::{Flex, FlexType, Pack, PackType, Scroll, ScrollType},
     image::RgbImage,
     prelude::*,
     tree::{self, TreeItem},
@@ -72,24 +72,65 @@ struct NodeData {
 
 struct EditWindow {
     scroll: Scroll,
+    pack: Pack,
 }
 
 impl EditWindow {
-    pub fn reset(&mut self) {
-        self.scroll.clear()
+    pub fn new<T: GroupExt>(parent_widget: &mut T) -> Result<EditWindow, FltkError> {
+        let mut scroll = fltk::group::Scroll::default()
+            .with_label("Edit Window")
+            .with_type(ScrollType::Vertical)
+            .with_size(600, 800);
+
+        parent_widget.add(&scroll);
+
+        scroll.begin();
+
+        let mut pack = Pack::default().with_size(scroll.w(), scroll.h());
+        // let mut pack = Pack::default();
+
+        pack.begin();
+
+        pack.add(
+            &frame::Frame::default_fill(), // .with_size(300, 300),
+        );
+
+        pack.set_spacing(2);
+        pack.set_type(PackType::Vertical);
+
+        pack.end();
+
+        scroll.add(&pack);
+
+        scroll.end();
+        scroll.show();
+
+        Ok(EditWindow { scroll, pack })
+    }
+
+    pub fn reset_begin(&mut self) {
+        self.pack.clear();
+        self.pack.begin();
+    }
+
+    pub fn reset_end(&mut self) {
+        self.pack.end();
+
+        self.scroll.scroll_to(0, 0);
+        self.redraw();
+    }
+
+    pub fn redraw(&mut self) {
+        self.pack.redraw();
+        self.scroll.redraw();
     }
 
     pub fn add_viewer<V: Viewable>(&mut self, viewable: V) {
-        viewable.create_viewer(&mut self.scroll);
-        self.scroll.scroll_to(0, 0);
-        self.scroll.redraw();
+        viewable.create_viewer(&mut self.pack);
     }
 
     pub fn add_editor<E: Editable>(&mut self, editable: &mut E) {
-        editable.create_editor(&mut self.scroll);
-
-        self.scroll.scroll_to(0, 0);
-        self.scroll.redraw();
+        editable.create_editor(&mut self.pack);
     }
 
     fn scroll_mut(&mut self) -> &mut Scroll {
@@ -106,8 +147,6 @@ struct AnyXPloreApp {
 
     flex: fltk::group::Flex,
 
-    image_frame: fltk::frame::Frame,
-
     tree: tree::Tree,
 
     bnl_structs: Vec<BNLStruct>,
@@ -116,22 +155,12 @@ struct AnyXPloreApp {
 
     main_win: window::Window,
 
-    count: i32,
-
     receiver: app::Receiver<Message>,
 }
 
 impl AnyXPloreApp {
     pub fn new() -> Self {
-        let count = 0;
         let app = app::App::default();
-
-        let (s, receiver) = app::channel();
-        let mut main_win = window::Window::default()
-            .with_size(1024, 768)
-            .with_label("AnyXPlore");
-
-        main_win.make_resizable(true);
 
         let args: Vec<String> = env::args().collect();
 
@@ -140,9 +169,19 @@ impl AnyXPloreApp {
             std::process::exit(1);
         }
 
-        let mut tree = tree::Tree::default();
+        let (s, receiver) = app::channel();
+        let mut main_win = window::Window::default()
+            .with_size(1024, 768)
+            .with_label("AnyXPlore");
 
+        let mut root = Flex::default().size_of_parent().with_type(FlexType::Row);
+        main_win.add_resizable(&root);
+        main_win.end();
+        // main_win.make_resizable(true);
+
+        let mut tree = tree::Tree::default();
         tree.set_show_root(false);
+        tree.emit(s, Message::TreeClicked);
 
         let filename = Path::new(&args[1])
             .file_name()
@@ -172,37 +211,24 @@ impl AnyXPloreApp {
             path: pb,
         }];
 
-        tree.emit(s, Message::TreeClicked);
+        root.add(&tree);
+        root.fixed(&tree, 350);
+        let edit_window = EditWindow::new(&mut root).expect("Unable to create edit window.");
 
-        let mut scroll = fltk::group::Scroll::default().with_label("Edit Window");
+        root.show();
+        root.end();
 
-        scroll.show();
-
-        let image_frame = fltk::frame::Frame::default();
-
-        scroll.add(&image_frame);
-        scroll.end();
-
-        let mut flex = Flex::default().size_of_parent();
-        flex.set_type(fltk::group::FlexType::Row);
-        flex.add(&tree);
-        flex.add(&scroll);
-
-        main_win.add(&flex);
-
-        main_win.end();
         main_win.show();
+        main_win.end();
 
         Self {
             app,
             tree,
             main_win,
-            edit_window: EditWindow { scroll },
-            count,
+            edit_window,
             receiver,
             bnl_structs: bnl_files,
-            flex,
-            image_frame,
+            flex: root,
         }
     }
 
@@ -235,7 +261,7 @@ impl AnyXPloreApp {
                     });
             }
 
-            return Ok(());
+            Ok(())
         } else {
             let bnl_struct = self
                 .bnl_structs
@@ -252,8 +278,9 @@ impl AnyXPloreApp {
             {
                 AssetType::ResTexture => {
                     if let Ok(tex) = bnl_struct.bnl_file.get_asset::<Texture>(&asset_name) {
-                        self.edit_window.reset();
+                        self.edit_window.reset_begin();
                         self.edit_window.add_viewer(tex);
+                        self.edit_window.reset_end();
                     }
                 }
                 t => {
