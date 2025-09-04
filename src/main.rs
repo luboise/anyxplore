@@ -18,7 +18,7 @@ use eframe::egui::{
     self, Id,
     ahash::{HashMap, HashSet},
 };
-use egui_ltreeview::{RowLayout, TreeView, TreeViewSettings};
+use egui_ltreeview::{Action, RowLayout, TreeView, TreeViewSettings};
 
 use crate::editors::{Editable, Viewable};
 
@@ -95,9 +95,16 @@ struct NodeData {
     bnl_index: usize,
 }
 
+#[derive(Clone)]
+struct AssetStruct {
+    name: String,
+    bnl_id: Id,
+}
+
 #[derive(Default)]
 struct AnyXPloreApp {
-    bnl_map: HashMap<Id, BNLStruct>,
+    asset_map: HashMap<Id, AssetStruct>, // Maps an aid to its parent BNL file
+    bnl_map: HashMap<Id, BNLStruct>,     // Maps a BNL id to its BNL struct
 
     selected_id: Option<Id>,
 
@@ -153,8 +160,18 @@ impl AnyXPloreApp {
                     );
 
                     inners.descriptions.iter().for_each(|desc| {
-                        let text = desc.name();
-                        builder.leaf(Id::new(text), text);
+                        let name = desc.name();
+
+                        let aid_id = Id::new(path.join(name)); // Id generated from full path + aid
+
+                        self.asset_map.insert(
+                            aid_id,
+                            AssetStruct {
+                                name: name.to_string(),
+                                bnl_id,
+                            },
+                        );
+                        builder.leaf(aid_id, name);
                     });
 
                     builder.close_dir();
@@ -192,32 +209,37 @@ impl eframe::App for AnyXPloreApp {
             ui.heading("AnyXplore");
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let (_response, actions) = TreeView::new(Id::new("tree view"))
-                    .with_settings(TreeViewSettings {
-                        row_layout: RowLayout::CompactAlignedLabels,
-                        ..Default::default()
-                    })
-                    .show(ui, |builder| {
-                        self.create_file_tree(&self.directory.clone(), builder)
-                            .unwrap_or_else(|_| eprintln!("Error while building tree."));
-                    });
+                let tree = TreeView::new(Id::new("tree view")).with_settings(TreeViewSettings {
+                    row_layout: RowLayout::CompactAlignedLabels,
+                    ..Default::default()
+                });
+
+                let (_response, actions) = tree.show(ui, |builder| {
+                    self.create_file_tree(&self.directory.clone(), builder)
+                        .unwrap_or_else(|_| eprintln!("Error while building tree."));
+                });
                 for action in actions {
-                    match action {
-                        egui_ltreeview::Action::Activate(activated) => {
-                            let bnl_id = activated.selected[0];
+                    if let Action::Activate(activated) = action {
+                        let id = activated.selected[0];
 
-                            println!("Activated id {:?}", bnl_id);
-
-                            if !self.bnl_map.contains_key(&bnl_id) {
-                                continue;
+                        // If the thing clicked was an asset, and it has a bnl file
+                        if let Some(asset_mapping) = self.asset_map.get(&id) {
+                            if self.bnl_map.contains_key(&asset_mapping.bnl_id) {
+                                self.selected_id = Some(id);
+                            } else {
+                                eprintln!("Asset mapping exists but no BNL exists for the asset.");
                             }
+                        }
 
-                            let bnl_struct = self.bnl_map.get_mut(&bnl_id).unwrap();
+                        if !self.bnl_map.contains_key(&id) {
+                            continue;
+                        }
 
-                            if bnl_struct.data().is_none() {}
+                        let bnl_struct = self.bnl_map.get_mut(&id).unwrap();
 
+                        if bnl_struct.data().is_none() {
                             let bnl_inners = BNLInners::from_bnl_bytes(
-                                &fs::read(&bnl_struct.path).unwrap_or(vec![]),
+                                &fs::read(&bnl_struct.path).unwrap_or_default(),
                             );
 
                             match bnl_inners {
@@ -225,17 +247,42 @@ impl eframe::App for AnyXPloreApp {
                                 Err(e) => eprintln!("Unable to load BNL file.\nError: {}", e),
                             }
                         }
-
-                        _ => (),
                     }
                 }
             });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(selected_id) = self.selected_id {
+                println!("SELECTED {:?}", selected_id);
+
+                let asset_struct = self.asset_map.get(&selected_id).unwrap();
+                let bnl_file = &self
+                    .bnl_map
+                    .get(&asset_struct.bnl_id)
+                    .unwrap()
+                    .data()
+                    .unwrap()
+                    .bnl_file;
+
+                let raw_asset = bnl_file.get_raw_asset(&asset_struct.name).unwrap();
+
+                match raw_asset.asset_type {
+                    AssetType::ResTexture => {
+                        let texture: Texture = bnl_file.get_asset(&asset_struct.name).unwrap();
+
+                        texture.create_viewer(ui);
+                    }
+
+                    _ => (),
+                }
+            }
         });
     }
 }
 
 impl AnyXPloreApp {
-    fn new(cc: &eframe::CreationContext<'_>, dir: Option<PathBuf>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>, dir: Option<PathBuf>) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use

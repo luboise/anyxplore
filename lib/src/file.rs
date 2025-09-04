@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 pub trait FileHandle {}
 
 pub trait VirtualFile {

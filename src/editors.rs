@@ -2,14 +2,7 @@ use bnl::asset::{
     Asset,
     texture::{Texture, TextureDescriptor},
 };
-use fltk::{
-    button,
-    enums::{self, CallbackTrigger, Event},
-    frame, group,
-    image::RgbImage,
-    input,
-    prelude::*,
-};
+use eframe::egui::{self, ImageSource, TextureId, load::SizedTexture};
 
 use crate::Message;
 
@@ -20,104 +13,69 @@ pub enum CreationFailure {
 }
 
 pub trait Viewable {
-    fn create_viewer<T: GroupExt>(&self, widget_parent: &mut T) -> Result<(), CreationFailure>;
+    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure>;
 }
 
 pub trait Editable: Viewable {
-    fn create_editor<T: GroupExt>(&mut self, widget_parent: &mut T) -> Result<(), CreationFailure>;
-}
-
-pub(crate) fn set_viewer_grid_title(
-    grid: &mut group::Grid,
-    label_text: &str,
-) -> Result<(), FltkError> {
-    let mut title = frame::Frame::default().with_label(label_text);
-    title.set_frame(enums::FrameType::FlatBox);
-    title.set_color(enums::Color::Red);
-    title.set_label_color(enums::Color::White);
-
-    grid.set_widget(&mut title, 0, 0..2)
-}
-
-pub(crate) fn set_viewer_grid_row<T: std::fmt::Debug>(
-    grid: &mut group::Grid,
-    row: usize,
-    label_text: &str,
-    value: T,
-) -> Result<(), FltkError> {
-    let label = &mut frame::Frame::default().with_label(label_text);
-    grid.set_widget(label, row, 0)?;
-
-    let input = &mut input::Input::default();
-
-    input.set_readonly(true);
-    input.set_value(&format!("{:?}", value));
-
-    grid.set_widget(input, row, 1)?;
-
-    Ok(())
+    fn create_editor(&mut self, ui: &mut egui::Ui) -> Result<(), CreationFailure>;
 }
 
 impl Viewable for TextureDescriptor {
-    fn create_viewer<T: GroupExt>(&self, widget_parent: &mut T) -> Result<(), CreationFailure> {
-        let mut grid = group::Grid::default().with_size(300, 400);
-        grid.show_grid(false);
+    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
+        ui.heading("Texture");
 
-        grid.set_layout(10, 2);
+        egui::Grid::new("some_unique_id").show(ui, |ui| {
+            ui.label("Format");
+            ui.label(format!("{:?}", self.format()));
+            ui.end_row();
 
-        let mut create_grid = || -> Result<(), FltkError> {
-            // 1 row for title
+            ui.label("Header Size");
+            ui.label(format!("{}", self.header_size()));
+            ui.end_row();
 
-            // 3 rows
-            set_viewer_grid_title(&mut grid, "Texture")?;
+            ui.label("Width");
+            ui.label(format!("{}", self.width()));
+            ui.end_row();
 
-            set_viewer_grid_row(&mut grid, 1, "Format", self.format())?;
-            set_viewer_grid_row(&mut grid, 2, "Header Size", self.header_size())?;
-            set_viewer_grid_row(&mut grid, 3, "Width", self.width())?;
-            set_viewer_grid_row(&mut grid, 4, "Height", self.height())?;
-            set_viewer_grid_row(&mut grid, 5, "Flags", self.flags())?;
-            set_viewer_grid_row(&mut grid, 6, "Unknown3a", self.unknown_3a())?;
-            set_viewer_grid_row(&mut grid, 7, "Resource Offset", self.texture_offset())?;
-            set_viewer_grid_row(&mut grid, 8, "Resource Size", self.texture_size())?;
+            ui.label("Height");
+            ui.label(format!("{}", self.height()));
+            ui.end_row();
 
-            Ok(())
-        };
+            ui.label("Flags");
+            ui.label(format!("{}", self.flags()));
+            ui.end_row();
 
-        create_grid().map_err(|e| {
-            grid.end();
-            CreationFailure::CompleteFailure(e.to_string())
-        })?;
+            ui.label("Unknown3a");
+            ui.label(format!("{}", self.unknown_3a()));
+            ui.end_row();
 
-        grid.end();
-        widget_parent.add(&grid);
+            ui.label("Resource Offset");
+            ui.label(format!("{}", self.texture_offset()));
+            ui.end_row();
+
+            ui.label("Resource Size");
+            ui.label(format!("{}", self.texture_size()));
+            ui.end_row();
+        });
 
         Ok(())
     }
 }
 
 impl Viewable for Texture {
-    fn create_viewer<T: GroupExt>(&self, widget_parent: &mut T) -> Result<(), CreationFailure> {
-        self.descriptor().create_viewer(widget_parent)?;
+    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
+        self.descriptor().create_viewer(ui)?;
 
         if let Ok(rgba) = self.to_rgba_image() {
-            if let Ok(mut img) = unsafe {
-                RgbImage::from_data(
-                    rgba.bytes(),
-                    rgba.width() as i32,
-                    rgba.height() as i32,
-                    fltk::enums::ColorDepth::Rgba8,
-                )
-            } {
-                println!("Setting image.");
+            // let image_source = ImageSource::Texture(SizedTexture::new(TextureId::User(()), size));
 
-                let mut frame = frame::Frame::default().with_size(widget_parent.width(), 500);
-                img.scale(frame.width(), frame.height(), true, true);
-                frame.set_image(Some(img));
+            // println!("Setting image.");
 
-                widget_parent.add(&frame);
-            }
+            // img.scale(frame.width(), frame.height(), true, true);
+
+            // ui.image(image_source);
         } else {
-            widget_parent.add(&frame::Frame::default().with_label("Error creating image view."));
+            ui.label("Error creating image view.");
         }
 
         Ok(())
@@ -125,39 +83,11 @@ impl Viewable for Texture {
 }
 
 impl Editable for Texture {
-    fn create_editor<T: GroupExt>(&mut self, widget_parent: &mut T) -> Result<(), CreationFailure> {
-        self.descriptor().create_viewer(widget_parent)?;
-
-        if let Ok(rgba) = self.to_rgba_image() {
-            if let Ok(mut img) = unsafe {
-                RgbImage::from_data(
-                    rgba.bytes(),
-                    rgba.width() as i32,
-                    rgba.height() as i32,
-                    fltk::enums::ColorDepth::Rgba8,
-                )
-            } {
-                println!("Setting image.");
-
-                let mut frame = frame::Frame::default().with_size(widget_parent.width(), 500);
-                img.scale(frame.width(), frame.height(), true, true);
-                frame.set_image(Some(img));
-
-                frame.handle(|f, ev| match ev {
-                    Event::Push => {
-                        println!("Frame clicked!");
-                        true
-                    }
-                    _ => false,
-                });
-                widget_parent.add(&frame);
-            }
-        } else {
-            widget_parent.add(&frame::Frame::default().with_label("Error creating image view."));
-        }
-
-        Ok(())
+    fn create_editor(&mut self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
+        self.descriptor().create_viewer(ui)?;
 
         // TODO: Make the editor here
+
+        Ok(())
     }
 }
