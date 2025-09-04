@@ -2,7 +2,9 @@ use bnl::asset::{
     Asset,
     texture::{Texture, TextureDescriptor},
 };
-use eframe::egui::{self, ImageSource, TextureId, load::SizedTexture};
+use eframe::egui::{
+    self, ColorImage, ImageSource, TextureHandle, TextureId, Vec2, load::SizedTexture,
+};
 
 use crate::Message;
 
@@ -67,13 +69,14 @@ impl Viewable for Texture {
         self.descriptor().create_viewer(ui)?;
 
         if let Ok(rgba) = self.to_rgba_image() {
-            // let image_source = ImageSource::Texture(SizedTexture::new(TextureId::User(()), size));
+            let color_image =
+                ColorImage::from_rgba_unmultiplied([rgba.width(), rgba.height()], rgba.bytes());
 
-            // println!("Setting image.");
+            let texture: TextureHandle =
+                ui.ctx()
+                    .load_texture("some texture", color_image, egui::TextureOptions::LINEAR);
 
-            // img.scale(frame.width(), frame.height(), true, true);
-
-            // ui.image(image_source);
+            ui.image(&texture);
         } else {
             ui.label("Error creating image view.");
         }

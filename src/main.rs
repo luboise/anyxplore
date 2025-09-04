@@ -254,8 +254,6 @@ impl eframe::App for AnyXPloreApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(selected_id) = self.selected_id {
-                println!("SELECTED {:?}", selected_id);
-
                 let asset_struct = self.asset_map.get(&selected_id).unwrap();
                 let bnl_file = &self
                     .bnl_map
