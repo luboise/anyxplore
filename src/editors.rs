@@ -2,7 +2,16 @@ use bnl::asset::{
     Asset,
     texture::{Texture, TextureDescriptor},
 };
-use fltk::{enums, frame, group, image::RgbImage, input, prelude::*};
+use fltk::{
+    button,
+    enums::{self, CallbackTrigger, Event},
+    frame, group,
+    image::RgbImage,
+    input,
+    prelude::*,
+};
+
+use crate::Message;
 
 #[derive(Debug)]
 pub enum CreationFailure {
@@ -117,7 +126,35 @@ impl Viewable for Texture {
 
 impl Editable for Texture {
     fn create_editor<T: GroupExt>(&mut self, widget_parent: &mut T) -> Result<(), CreationFailure> {
-        self.create_viewer(widget_parent)?;
+        self.descriptor().create_viewer(widget_parent)?;
+
+        if let Ok(rgba) = self.to_rgba_image() {
+            if let Ok(mut img) = unsafe {
+                RgbImage::from_data(
+                    rgba.bytes(),
+                    rgba.width() as i32,
+                    rgba.height() as i32,
+                    fltk::enums::ColorDepth::Rgba8,
+                )
+            } {
+                println!("Setting image.");
+
+                let mut frame = frame::Frame::default().with_size(widget_parent.width(), 500);
+                img.scale(frame.width(), frame.height(), true, true);
+                frame.set_image(Some(img));
+
+                frame.handle(|f, ev| match ev {
+                    Event::Push => {
+                        println!("Frame clicked!");
+                        true
+                    }
+                    _ => false,
+                });
+                widget_parent.add(&frame);
+            }
+        } else {
+            widget_parent.add(&frame::Frame::default().with_label("Error creating image view."));
+        }
 
         Ok(())
 
