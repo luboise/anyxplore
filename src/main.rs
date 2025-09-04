@@ -67,12 +67,12 @@ impl BNLInners {
 #[derive(Debug, Default)]
 struct BNLStruct {
     path: PathBuf,
-    data: Option<BNLInners>,
+    inners: Option<BNLInners>,
 }
 
 impl BNLStruct {
     fn data(&self) -> Option<&BNLInners> {
-        self.data.as_ref()
+        self.inners.as_ref()
     }
 }
 
@@ -124,49 +124,50 @@ impl AnyXPloreApp {
         for entry in entries {
             let path = entry?.path().clone();
 
-            println!("{}", path.display());
-
             let bnl_id = Id::new(&path);
 
-            if self.bnl_map.contains_key(&bnl_id) {
-                builder.dir(
-                    bnl_id,
-                    path.file_name()
-                        .expect("bruh")
-                        .to_str()
-                        .map(|val| val.to_string())
-                        .unwrap_or("errorfile".to_string()),
-                );
-
-                let bnl_struct = self.bnl_map.get(&bnl_id).unwrap();
-                if let Some(data) = bnl_struct.data() {
-                    data.descriptions.iter().for_each(|desc| {
-                        let text = desc.name();
-
-                        builder.leaf(Id::new(text), path.join(text).to_str().unwrap_or_default());
-                    });
+            // If we find a bnl file
+            if path.is_file() && path.extension().unwrap_or_default() == "bnl" {
+                // Create a BNLStruct if one doesn't already exist
+                if !self.bnl_map.contains_key(&bnl_id) {
+                    self.bnl_map.insert(
+                        bnl_id,
+                        BNLStruct {
+                            path: path.clone(),
+                            ..Default::default()
+                        },
+                    );
                 }
 
-                builder.close_dir();
-            } else if path.is_file() && path.extension().unwrap_or_default() == "bnl" {
-                builder.dir(
-                    bnl_id,
-                    path.file_name()
-                        .expect("bruh")
-                        .to_str()
-                        .map(|val| val.to_string())
-                        .unwrap_or("errorfile".to_string()),
-                );
+                // We can unwrap because we just made sure its available
+                let bnl_struct = self.bnl_map.get_mut(&bnl_id).unwrap();
 
-                self.bnl_map.insert(
-                    bnl_id,
-                    BNLStruct {
-                        path,
-                        ..Default::default()
-                    },
-                );
+                if let Some(inners) = &bnl_struct.inners {
+                    builder.dir(
+                        bnl_id,
+                        path.file_name()
+                            .expect("bruh")
+                            .to_str()
+                            .map(|val| val.to_string())
+                            .unwrap_or("errorfile".to_string()),
+                    );
 
-                builder.close_dir();
+                    inners.descriptions.iter().for_each(|desc| {
+                        let text = desc.name();
+                        builder.leaf(Id::new(text), text);
+                    });
+
+                    builder.close_dir();
+                } else {
+                    builder.leaf(
+                        bnl_id,
+                        path.file_name()
+                            .expect("bruh")
+                            .to_str()
+                            .map(|val| val.to_string())
+                            .unwrap_or("errorfile".to_string()),
+                    );
+                }
             } else if path.is_dir() {
                 builder.dir(
                     Id::new(&path),
@@ -188,10 +189,10 @@ impl AnyXPloreApp {
 impl eframe::App for AnyXPloreApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-            ui.heading("Hello World!");
+            ui.heading("AnyXplore");
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let (a, b) = TreeView::new(Id::new("tree view"))
+                let (_response, actions) = TreeView::new(Id::new("tree view"))
                     .with_settings(TreeViewSettings {
                         row_layout: RowLayout::CompactAlignedLabels,
                         ..Default::default()
@@ -200,10 +201,12 @@ impl eframe::App for AnyXPloreApp {
                         self.create_file_tree(&self.directory.clone(), builder)
                             .unwrap_or_else(|_| eprintln!("Error while building tree."));
                     });
-                for action in b {
+                for action in actions {
                     match action {
                         egui_ltreeview::Action::Activate(activated) => {
                             let bnl_id = activated.selected[0];
+
+                            println!("Activated id {:?}", bnl_id);
 
                             if !self.bnl_map.contains_key(&bnl_id) {
                                 continue;
@@ -218,7 +221,7 @@ impl eframe::App for AnyXPloreApp {
                             );
 
                             match bnl_inners {
-                                Ok(inners) => bnl_struct.data = Some(inners),
+                                Ok(inners) => bnl_struct.inners = Some(inners),
                                 Err(e) => eprintln!("Unable to load BNL file.\nError: {}", e),
                             }
                         }
