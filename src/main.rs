@@ -14,18 +14,11 @@ use bnl::{
     asset::{AssetDescription, texture::Texture},
     game::AssetType,
 };
-use eframe::egui::{self, Id};
-use egui_ltreeview::{RowLayout, TreeView, TreeViewSettings};
-use fltk::{
-    app::{self},
-    button, frame,
-    group::{Flex, FlexType, Pack, PackType, Scroll, ScrollType},
-    image::RgbImage,
-    prelude::*,
-    tree::{self, TreeItem},
-    window,
+use eframe::egui::{
+    self, Id,
+    ahash::{HashMap, HashSet},
 };
-use walkdir::WalkDir;
+use egui_ltreeview::{RowLayout, TreeView, TreeViewSettings};
 
 use crate::editors::{Editable, Viewable};
 
@@ -38,13 +31,49 @@ enum Message {
     TreeClicked,
 }
 
-struct BNLStruct {
-    tree_id: u32,
-
-    path: PathBuf,
-
-    descriptions: Option<Vec<AssetDescription>>,
+#[derive(Debug)]
+struct BNLInners {
     bnl_file: BNLFile,
+    descriptions: Vec<AssetDescription>,
+}
+
+impl BNLInners {
+    fn bnl_file(&self) -> &BNLFile {
+        &self.bnl_file
+    }
+
+    fn bnl_file_mut(&mut self) -> &mut BNLFile {
+        &mut self.bnl_file
+    }
+
+    // println!("Loading asset descriptions for {}", self.path.display());
+
+    pub fn load_asset_descriptions(&mut self) -> Result<&Vec<AssetDescription>, XError> {
+        self.descriptions = self.bnl_file.asset_descriptions().to_vec();
+        Ok(&self.descriptions)
+    }
+
+    pub fn from_bnl_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        let bnl_file = bnl::BNLFile::from_bytes(&bytes).expect("Unable to create BNL file.");
+        let descriptions = bnl_file.asset_descriptions().to_owned();
+
+        Ok(BNLInners {
+            bnl_file,
+            descriptions,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct BNLStruct {
+    path: PathBuf,
+    data: Option<BNLInners>,
+}
+
+impl BNLStruct {
+    fn data(&self) -> Option<&BNLInners> {
+        self.data.as_ref()
+    }
 }
 
 #[derive(Debug)]
@@ -60,18 +89,6 @@ impl Display for XError {
     }
 }
 
-impl BNLStruct {
-    pub fn load_asset_descriptions(&mut self) -> Result<&Vec<AssetDescription>, XError> {
-        println!("Loading asset descriptions for {}", self.path.display());
-
-        let descriptions = self.bnl_file.asset_descriptions().to_vec();
-        self.descriptions = Some(descriptions);
-
-        // Unwrap can't fail since we just assigned it
-        Ok(&self.descriptions.as_ref().unwrap())
-    }
-}
-
 #[derive(Clone)]
 struct NodeData {
     is_root: bool,
@@ -80,7 +97,9 @@ struct NodeData {
 
 #[derive(Default)]
 struct AnyXPloreApp {
-    app: app::App,
+    bnl_map: HashMap<Id, BNLStruct>,
+
+    selected_id: Option<Id>,
 
     directory: PathBuf,
     directory_valid: bool,
@@ -93,39 +112,77 @@ struct AnyXPloreApp {
     // receiver: app::Receiver<Message>,
 }
 
-fn create_file_tree(
-    path: &PathBuf,
-    builder: &mut egui_ltreeview::TreeViewBuilder<'_, Id>,
-) -> Result<(), io::Error> {
-    let entries = fs::read_dir(path)?;
+impl AnyXPloreApp {
+    fn create_file_tree(
+        &mut self,
+        path: &PathBuf,
+        builder: &mut egui_ltreeview::TreeViewBuilder<'_, Id>,
+        // paths: &mut HashMap<Id, PathBuf>,
+    ) -> Result<(), io::Error> {
+        let entries = fs::read_dir(path)?;
 
-    for entry in entries {
-        let path = entry?.path().clone();
+        for entry in entries {
+            let path = entry?.path().clone();
 
-        if path.is_file() {
-            builder.leaf(
-                Id::new(&path),
-                path.file_name()
-                    .expect("bruh")
-                    .to_str()
-                    .map(|val| val.to_string())
-                    .unwrap_or("errorfile".to_string()),
-            );
-        } else if path.is_dir() {
-            builder.dir(
-                Id::new(&path),
-                path.file_name()
-                    .expect("bruh")
-                    .to_str()
-                    .map(|val| val.to_string())
-                    .unwrap_or("errorfile".to_string()),
-            );
-            create_file_tree(&path, builder)?;
-            builder.close_dir();
+            println!("{}", path.display());
+
+            let bnl_id = Id::new(&path);
+
+            if self.bnl_map.contains_key(&bnl_id) {
+                builder.dir(
+                    bnl_id,
+                    path.file_name()
+                        .expect("bruh")
+                        .to_str()
+                        .map(|val| val.to_string())
+                        .unwrap_or("errorfile".to_string()),
+                );
+
+                let bnl_struct = self.bnl_map.get(&bnl_id).unwrap();
+                if let Some(data) = bnl_struct.data() {
+                    data.descriptions.iter().for_each(|desc| {
+                        let text = desc.name();
+
+                        builder.leaf(Id::new(text), path.join(text).to_str().unwrap_or_default());
+                    });
+                }
+
+                builder.close_dir();
+            } else if path.is_file() && path.extension().unwrap_or_default() == "bnl" {
+                builder.dir(
+                    bnl_id,
+                    path.file_name()
+                        .expect("bruh")
+                        .to_str()
+                        .map(|val| val.to_string())
+                        .unwrap_or("errorfile".to_string()),
+                );
+
+                self.bnl_map.insert(
+                    bnl_id,
+                    BNLStruct {
+                        path,
+                        ..Default::default()
+                    },
+                );
+
+                builder.close_dir();
+            } else if path.is_dir() {
+                builder.dir(
+                    Id::new(&path),
+                    path.file_name()
+                        .expect("bruh")
+                        .to_str()
+                        .map(|val| val.to_string())
+                        .unwrap_or("errorfile".to_string()),
+                );
+                self.create_file_tree(&path, builder)?;
+                builder.close_dir();
+            }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 impl eframe::App for AnyXPloreApp {
@@ -140,14 +197,32 @@ impl eframe::App for AnyXPloreApp {
                         ..Default::default()
                     })
                     .show(ui, |builder| {
-                        create_file_tree(&self.directory, builder)
+                        self.create_file_tree(&self.directory.clone(), builder)
                             .unwrap_or_else(|_| eprintln!("Error while building tree."));
                     });
                 for action in b {
                     match action {
                         egui_ltreeview::Action::Activate(activated) => {
-                            println!("Activated {:?}", activated.selected);
+                            let bnl_id = activated.selected[0];
+
+                            if !self.bnl_map.contains_key(&bnl_id) {
+                                continue;
+                            }
+
+                            let bnl_struct = self.bnl_map.get_mut(&bnl_id).unwrap();
+
+                            if bnl_struct.data().is_none() {}
+
+                            let bnl_inners = BNLInners::from_bnl_bytes(
+                                &fs::read(&bnl_struct.path).unwrap_or(vec![]),
+                            );
+
+                            match bnl_inners {
+                                Ok(inners) => bnl_struct.data = Some(inners),
+                                Err(e) => eprintln!("Unable to load BNL file.\nError: {}", e),
+                            }
                         }
+
                         _ => (),
                     }
                 }
