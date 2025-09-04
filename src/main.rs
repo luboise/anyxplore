@@ -1,8 +1,12 @@
 use std::{
+    any::Any,
     env,
+    ffi::OsStr,
     fmt::Display,
-    fs,
+    fs::{self, DirEntry, ReadDir},
+    io,
     path::{Path, PathBuf},
+    time,
 };
 
 use bnl::{
@@ -10,6 +14,8 @@ use bnl::{
     asset::{AssetDescription, texture::Texture},
     game::AssetType,
 };
+use eframe::egui::{self, Id};
+use egui_ltreeview::{RowLayout, TreeView, TreeViewSettings};
 use fltk::{
     app::{self},
     button, frame,
@@ -19,9 +25,11 @@ use fltk::{
     tree::{self, TreeItem},
     window,
 };
+use walkdir::WalkDir;
 
 use crate::editors::{Editable, Viewable};
 
+// mod edit_window;
 mod editors;
 mod widgets;
 
@@ -70,95 +78,107 @@ struct NodeData {
     bnl_index: usize,
 }
 
-struct EditWindow {
-    scroll: Scroll,
-    pack: Pack,
-}
-
-impl EditWindow {
-    pub fn new<T: GroupExt>(parent_widget: &mut T) -> Result<EditWindow, FltkError> {
-        let mut scroll = fltk::group::Scroll::default()
-            .with_label("Edit Window")
-            .with_type(ScrollType::Vertical)
-            .with_size(600, 800);
-
-        parent_widget.add(&scroll);
-
-        scroll.begin();
-
-        let mut pack = Pack::default().with_size(scroll.w(), scroll.h());
-        // let mut pack = Pack::default();
-
-        pack.begin();
-
-        pack.add(
-            &frame::Frame::default_fill(), // .with_size(300, 300),
-        );
-
-        pack.set_spacing(2);
-        pack.set_type(PackType::Vertical);
-
-        pack.end();
-
-        scroll.add(&pack);
-
-        scroll.end();
-        scroll.show();
-
-        Ok(EditWindow { scroll, pack })
-    }
-
-    pub fn reset_begin(&mut self) {
-        self.pack.clear();
-        self.pack.begin();
-    }
-
-    pub fn reset_end(&mut self) {
-        self.pack.end();
-
-        self.scroll.scroll_to(0, 0);
-        self.redraw();
-    }
-
-    pub fn redraw(&mut self) {
-        self.pack.redraw();
-        self.scroll.redraw();
-    }
-
-    pub fn add_viewer<V: Viewable>(&mut self, viewable: V) {
-        viewable.create_viewer(&mut self.pack);
-    }
-
-    pub fn add_editor<E: Editable>(&mut self, editable: &mut E) {
-        editable.create_editor(&mut self.pack);
-    }
-
-    fn scroll_mut(&mut self) -> &mut Scroll {
-        &mut self.scroll
-    }
-
-    fn scroll(&self) -> &Scroll {
-        &self.scroll
-    }
-}
-
+#[derive(Default)]
 struct AnyXPloreApp {
     app: app::App,
 
-    flex: fltk::group::Flex,
+    directory: PathBuf,
+    directory_valid: bool,
 
-    tree: tree::Tree,
-
+    // flex: fltk::group::Flex,
+    // tree: tree::Tree,
     bnl_structs: Vec<BNLStruct>,
+    // edit_window: EditWindow,
+    // main_win: window::Window,
+    // receiver: app::Receiver<Message>,
+}
 
-    edit_window: EditWindow,
+fn create_file_tree(
+    path: &PathBuf,
+    builder: &mut egui_ltreeview::TreeViewBuilder<'_, Id>,
+) -> Result<(), io::Error> {
+    let entries = fs::read_dir(path)?;
 
-    main_win: window::Window,
+    for entry in entries {
+        let path = entry?.path().clone();
 
-    receiver: app::Receiver<Message>,
+        if path.is_file() {
+            builder.leaf(
+                Id::new(&path),
+                path.file_name()
+                    .expect("bruh")
+                    .to_str()
+                    .map(|val| val.to_string())
+                    .unwrap_or("errorfile".to_string()),
+            );
+        } else if path.is_dir() {
+            builder.dir(
+                Id::new(&path),
+                path.file_name()
+                    .expect("bruh")
+                    .to_str()
+                    .map(|val| val.to_string())
+                    .unwrap_or("errorfile".to_string()),
+            );
+            create_file_tree(&path, builder)?;
+            builder.close_dir();
+        }
+    }
+
+    Ok(())
+}
+
+impl eframe::App for AnyXPloreApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+            ui.heading("Hello World!");
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let (a, b) = TreeView::new(Id::new("tree view"))
+                    .with_settings(TreeViewSettings {
+                        row_layout: RowLayout::CompactAlignedLabels,
+                        ..Default::default()
+                    })
+                    .show(ui, |builder| {
+                        create_file_tree(&self.directory, builder)
+                            .unwrap_or_else(|_| eprintln!("Error while building tree."));
+                    });
+                for action in b {
+                    match action {
+                        egui_ltreeview::Action::Activate(activated) => {
+                            println!("Activated {:?}", activated.selected);
+                        }
+                        _ => (),
+                    }
+                }
+            });
+        });
+    }
 }
 
 impl AnyXPloreApp {
+    fn new(cc: &eframe::CreationContext<'_>, dir: Option<PathBuf>) -> Self {
+        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
+        // Restore app state using cc.storage (requires the "persistence" feature).
+        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
+        // for e.g. egui::PaintCallback.
+
+        match dir {
+            Some(d) => AnyXPloreApp {
+                directory: d,
+                directory_valid: false,
+                ..Default::default()
+            },
+
+            None => AnyXPloreApp {
+                directory_valid: false,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+/*
     pub fn new() -> Self {
         let app = app::App::default();
 
@@ -305,7 +325,27 @@ impl AnyXPloreApp {
     }
 }
 
+
+// fn main() {
+// let app = AnyXPloreApp::new();
+// app.run();
+// }
+
+
+*/
+
 fn main() {
-    let app = AnyXPloreApp::new();
-    app.run();
+    let args: Vec<String> = env::args().collect();
+
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "My egui App",
+        native_options,
+        Box::new(|cc| {
+            Ok(Box::new(AnyXPloreApp::new(
+                cc,
+                args.get(1).map(PathBuf::from),
+            )))
+        }),
+    );
 }
