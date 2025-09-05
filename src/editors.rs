@@ -3,6 +3,7 @@ use std::time::SystemTime;
 use bnl::asset::{
     Asset,
     model::Model,
+    script::{Script, ScriptDescriptor, ScriptParamType},
     texture::{Texture, TextureDescriptor},
 };
 use eframe::egui::{
@@ -36,14 +37,18 @@ impl<'a> ViewerContext<'a> {
 
         index
     }
+
+    pub fn ui_mut(&mut self) -> &mut &'a mut egui::Ui {
+        &mut self.ui
+    }
 }
 
 pub trait Viewable {
-    fn create_viewer(&self, ui: &mut ViewerContext) -> Result<(), CreationFailure>;
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure>;
 }
 
 pub trait Editable: Viewable {
-    fn create_editor(&mut self, ui: &mut ViewerContext) -> Result<(), CreationFailure>;
+    fn create_editor(&mut self, ctx: &mut ViewerContext) -> Result<(), CreationFailure>;
 }
 
 impl Viewable for TextureDescriptor {
@@ -132,6 +137,45 @@ impl Viewable for Model {
         for texture in textures {
             texture.create_viewer(ctx)?;
         }
+
+        Ok(())
+    }
+}
+
+impl Viewable for ScriptDescriptor {
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        ctx.ui
+            .heading(format!("Script ({} Operations)", self.operations().len()));
+
+        egui::Grid::new("script_viewer").show(ctx.ui, |ui| {
+            self.operations().iter().for_each(|op| {
+                ui.label(format!("{:?}", op.opcode()));
+
+                let shape = op.get_shape();
+
+                for (key, value) in shape {
+                    // TODO: Add other cases later
+                    match value.param_type() {
+                        ScriptParamType::F32 => {
+                            let bytes: [u8; 4] = op.operand_bytes().try_into().unwrap();
+
+                            ui.label(format!("{:.1}", f32::from_le_bytes(bytes)));
+                        }
+                        _ => (),
+                    }
+                }
+
+                ui.end_row();
+            });
+        });
+
+        Ok(())
+    }
+}
+
+impl Viewable for Script {
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        self.descriptor().create_viewer(ctx)?;
 
         Ok(())
     }

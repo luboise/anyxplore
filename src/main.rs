@@ -8,7 +8,7 @@ use std::{
 
 use bnl::{
     BNLFile,
-    asset::{Asset, AssetDescription, model::Model, texture::Texture},
+    asset::{Asset, AssetDescription, model::Model, script::Script, texture::Texture},
     game::AssetType,
 };
 use eframe::egui::{
@@ -264,99 +264,110 @@ impl eframe::App for AnyXPloreApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |mut ui| {
-            if let Some(selected_id) = self.selected_id {
-                let asset_struct = self.asset_map.get(&selected_id).unwrap();
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(selected_id) = self.selected_id {
+                    let asset_struct = self.asset_map.get(&selected_id).unwrap();
 
-                let bnl_struct = self
-                    .bnl_map
-                    .get_mut(&asset_struct.bnl_id)
-                    .expect("Unable to get BNL struct.");
+                    let bnl_struct = self
+                        .bnl_map
+                        .get_mut(&asset_struct.bnl_id)
+                        .expect("Unable to get BNL struct.");
 
-                let bnl_path = bnl_struct.path.clone();
+                    let bnl_path = bnl_struct.path.clone();
 
-                if let Some(inners) = bnl_struct.inners_mut() {
-                    let bnl_file: &mut BNLFile = &mut inners.bnl_file;
-                    // Now you can mutate `bnl_file` as needed
+                    if let Some(inners) = bnl_struct.inners_mut() {
+                        let bnl_file: &mut BNLFile = &mut inners.bnl_file;
+                        // Now you can mutate `bnl_file` as needed
 
-                    let raw_asset = bnl_file.get_raw_asset(&asset_struct.name).unwrap();
+                        let raw_asset = bnl_file.get_raw_asset(&asset_struct.name).unwrap();
 
-                    let mut viewer_ctx = ViewerContext::new(ui);
+                        let mut viewer_ctx = ViewerContext::new(ui);
 
-                    match raw_asset.asset_type {
-                        AssetType::ResTexture => {
-                            let mut texture: Texture =
-                                bnl_file.get_asset(&asset_struct.name).unwrap();
-                            texture.create_viewer(&mut viewer_ctx);
+                        match raw_asset.asset_type {
+                            AssetType::ResTexture => {
+                                let mut texture: Texture =
+                                    bnl_file.get_asset(&asset_struct.name).unwrap();
+                                texture.create_viewer(&mut viewer_ctx);
 
-                            if ui.button("Set Texture").clicked() {
-                                self.file_dialog.pick_file();
+                                if ui.button("Set Texture").clicked() {
+                                    self.file_dialog.pick_file();
+                                }
+
+                                self.file_dialog.update(ctx);
+
+                                if let Some(path) = self.file_dialog.take_picked() {
+                                    self.picked_file = Some(path.to_path_buf());
+                                }
+
+                                if let Some(file) = self.picked_file.take() {
+                                    let img = ImageReader::open(&file)
+                                        .expect("Unable to open image")
+                                        .decode()
+                                        .expect("Unable to decode image");
+
+                                    texture.set_from_rgba(
+                                        texture.descriptor().width() as usize,
+                                        texture.descriptor().height() as usize,
+                                        img.as_bytes(),
+                                    );
+
+                                    println!("Updating image");
+                                    bnl_file.update_asset(&asset_struct.name, &texture);
+
+                                    fs::write(bnl_path, &bnl_file.to_bytes())
+                                        .expect("Unable to write");
+                                }
+                            }
+                            AssetType::ResModel => {
+                                let model: Model = bnl_file.get_asset(&asset_struct.name).unwrap();
+
+                                model.create_viewer(&mut viewer_ctx);
+
+                                /*
+                                if ui.button("Set Texture").clicked() {
+                                    self.file_dialog.pick_file();
+                                }
+
+                                self.file_dialog.update(ctx);
+
+                                if let Some(path) = self.file_dialog.take_picked() {
+                                    self.picked_file = Some(path.to_path_buf());
+                                }
+
+                                if let Some(file) = self.picked_file.take() {
+                                    let img = ImageReader::open(&file)
+                                        .expect("Unable to open image")
+                                        .decode()
+                                        .expect("Unable to decode image");
+
+                                    texture.set_from_rgba(
+                                        texture.descriptor().width() as usize,
+                                        texture.descriptor().height() as usize,
+                                        img.as_bytes(),
+                                    );
+
+                                    println!("Updating image");
+                                    bnl_file.update_asset(&asset_struct.name, &texture);
+
+                                    fs::write(bnl_path, &bnl_file.to_bytes()).expect("Unable to write");
+                                }
+                                */
+                            }
+                            AssetType::ResScript => {
+                                if let Ok(script) = bnl_file.get_asset::<Script>(&asset_struct.name)
+                                {
+                                    script.create_viewer(&mut viewer_ctx);
+                                } else {
+                                    viewer_ctx.ui_mut().heading("Error parsing script.");
+                                }
                             }
 
-                            self.file_dialog.update(ctx);
-
-                            if let Some(path) = self.file_dialog.take_picked() {
-                                self.picked_file = Some(path.to_path_buf());
-                            }
-
-                            if let Some(file) = self.picked_file.take() {
-                                let img = ImageReader::open(&file)
-                                    .expect("Unable to open image")
-                                    .decode()
-                                    .expect("Unable to decode image");
-
-                                texture.set_from_rgba(
-                                    texture.descriptor().width() as usize,
-                                    texture.descriptor().height() as usize,
-                                    img.as_bytes(),
-                                );
-
-                                println!("Updating image");
-                                bnl_file.update_asset(&asset_struct.name, &texture);
-
-                                fs::write(bnl_path, &bnl_file.to_bytes()).expect("Unable to write");
-                            }
+                            _ => (),
                         }
-                        AssetType::ResModel => {
-                            let model: Model = bnl_file.get_asset(&asset_struct.name).unwrap();
-
-                            model.create_viewer(&mut viewer_ctx);
-
-                            /*
-                            if ui.button("Set Texture").clicked() {
-                                self.file_dialog.pick_file();
-                            }
-
-                            self.file_dialog.update(ctx);
-
-                            if let Some(path) = self.file_dialog.take_picked() {
-                                self.picked_file = Some(path.to_path_buf());
-                            }
-
-                            if let Some(file) = self.picked_file.take() {
-                                let img = ImageReader::open(&file)
-                                    .expect("Unable to open image")
-                                    .decode()
-                                    .expect("Unable to decode image");
-
-                                texture.set_from_rgba(
-                                    texture.descriptor().width() as usize,
-                                    texture.descriptor().height() as usize,
-                                    img.as_bytes(),
-                                );
-
-                                println!("Updating image");
-                                bnl_file.update_asset(&asset_struct.name, &texture);
-
-                                fs::write(bnl_path, &bnl_file.to_bytes()).expect("Unable to write");
-                            }
-                            */
-                        }
-
-                        _ => (),
                     }
                 }
-            }
+            });
         });
     }
 }
