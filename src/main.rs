@@ -1,26 +1,26 @@
 use std::{
-    any::Any,
     env,
-    ffi::OsStr,
     fmt::Display,
-    fs::{self, DirEntry, ReadDir},
+    fs::{self},
     io,
-    path::{Path, PathBuf},
-    time,
+    path::PathBuf,
 };
 
 use bnl::{
     BNLFile,
-    asset::{AssetDescription, texture::Texture},
+    asset::{Asset, AssetDescription, model::Model, texture::Texture},
     game::AssetType,
 };
 use eframe::egui::{
     self, Id,
     ahash::{HashMap, HashSet},
 };
+use egui_file_dialog::FileDialog;
 use egui_ltreeview::{Action, RowLayout, TreeView, TreeViewSettings};
 
-use crate::editors::{Editable, Viewable};
+use crate::editors::{Editable, Viewable, ViewerContext};
+
+use image::ImageReader;
 
 // mod edit_window;
 mod editors;
@@ -71,8 +71,12 @@ struct BNLStruct {
 }
 
 impl BNLStruct {
-    fn data(&self) -> Option<&BNLInners> {
+    fn inners(&self) -> Option<&BNLInners> {
         self.inners.as_ref()
+    }
+
+    fn inners_mut(&mut self) -> &mut Option<BNLInners> {
+        &mut self.inners
     }
 }
 
@@ -117,6 +121,10 @@ struct AnyXPloreApp {
     // edit_window: EditWindow,
     // main_win: window::Window,
     // receiver: app::Receiver<Message>,
+    dropped_files: Vec<egui::DroppedFile>,
+
+    file_dialog: FileDialog,
+    picked_file: Option<PathBuf>,
 }
 
 impl AnyXPloreApp {
@@ -205,6 +213,10 @@ impl AnyXPloreApp {
 
 impl eframe::App for AnyXPloreApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.dropped_files.clear();
+        self.dropped_files
+            .extend(ctx.input(|i| i.raw.dropped_files.clone()));
+
         egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
             ui.heading("AnyXplore");
 
@@ -237,7 +249,7 @@ impl eframe::App for AnyXPloreApp {
 
                         let bnl_struct = self.bnl_map.get_mut(&id).unwrap();
 
-                        if bnl_struct.data().is_none() {
+                        if bnl_struct.inners().is_none() {
                             let bnl_inners = BNLInners::from_bnl_bytes(
                                 &fs::read(&bnl_struct.path).unwrap_or_default(),
                             );
@@ -252,27 +264,97 @@ impl eframe::App for AnyXPloreApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ctx, |mut ui| {
             if let Some(selected_id) = self.selected_id {
                 let asset_struct = self.asset_map.get(&selected_id).unwrap();
-                let bnl_file = &self
+
+                let bnl_struct = self
                     .bnl_map
-                    .get(&asset_struct.bnl_id)
-                    .unwrap()
-                    .data()
-                    .unwrap()
-                    .bnl_file;
+                    .get_mut(&asset_struct.bnl_id)
+                    .expect("Unable to get BNL struct.");
 
-                let raw_asset = bnl_file.get_raw_asset(&asset_struct.name).unwrap();
+                let bnl_path = bnl_struct.path.clone();
 
-                match raw_asset.asset_type {
-                    AssetType::ResTexture => {
-                        let texture: Texture = bnl_file.get_asset(&asset_struct.name).unwrap();
+                if let Some(inners) = bnl_struct.inners_mut() {
+                    let bnl_file: &mut BNLFile = &mut inners.bnl_file;
+                    // Now you can mutate `bnl_file` as needed
 
-                        texture.create_viewer(ui);
+                    let raw_asset = bnl_file.get_raw_asset(&asset_struct.name).unwrap();
+
+                    let mut viewer_ctx = ViewerContext::new(ui);
+
+                    match raw_asset.asset_type {
+                        AssetType::ResTexture => {
+                            let mut texture: Texture =
+                                bnl_file.get_asset(&asset_struct.name).unwrap();
+                            texture.create_viewer(&mut viewer_ctx);
+
+                            if ui.button("Set Texture").clicked() {
+                                self.file_dialog.pick_file();
+                            }
+
+                            self.file_dialog.update(ctx);
+
+                            if let Some(path) = self.file_dialog.take_picked() {
+                                self.picked_file = Some(path.to_path_buf());
+                            }
+
+                            if let Some(file) = self.picked_file.take() {
+                                let img = ImageReader::open(&file)
+                                    .expect("Unable to open image")
+                                    .decode()
+                                    .expect("Unable to decode image");
+
+                                texture.set_from_rgba(
+                                    texture.descriptor().width() as usize,
+                                    texture.descriptor().height() as usize,
+                                    img.as_bytes(),
+                                );
+
+                                println!("Updating image");
+                                bnl_file.update_asset(&asset_struct.name, &texture);
+
+                                fs::write(bnl_path, &bnl_file.to_bytes()).expect("Unable to write");
+                            }
+                        }
+                        AssetType::ResModel => {
+                            let model: Model = bnl_file.get_asset(&asset_struct.name).unwrap();
+
+                            model.create_viewer(&mut viewer_ctx);
+
+                            /*
+                            if ui.button("Set Texture").clicked() {
+                                self.file_dialog.pick_file();
+                            }
+
+                            self.file_dialog.update(ctx);
+
+                            if let Some(path) = self.file_dialog.take_picked() {
+                                self.picked_file = Some(path.to_path_buf());
+                            }
+
+                            if let Some(file) = self.picked_file.take() {
+                                let img = ImageReader::open(&file)
+                                    .expect("Unable to open image")
+                                    .decode()
+                                    .expect("Unable to decode image");
+
+                                texture.set_from_rgba(
+                                    texture.descriptor().width() as usize,
+                                    texture.descriptor().height() as usize,
+                                    img.as_bytes(),
+                                );
+
+                                println!("Updating image");
+                                bnl_file.update_asset(&asset_struct.name, &texture);
+
+                                fs::write(bnl_path, &bnl_file.to_bytes()).expect("Unable to write");
+                            }
+                            */
+                        }
+
+                        _ => (),
                     }
-
-                    _ => (),
                 }
             }
         });
@@ -301,166 +383,12 @@ impl AnyXPloreApp {
     }
 }
 
-/*
-    pub fn new() -> Self {
-        let app = app::App::default();
-
-        let args: Vec<String> = env::args().collect();
-
-        if args.len() < 2 {
-            eprintln!("Not enough args.");
-            std::process::exit(1);
-        }
-
-        let (s, receiver) = app::channel();
-        let mut main_win = window::Window::default()
-            .with_size(1024, 768)
-            .with_label("AnyXPlore");
-
-        let mut root = Flex::default().size_of_parent().with_type(FlexType::Row);
-        main_win.add_resizable(&root);
-        main_win.end();
-        // main_win.make_resizable(true);
-
-        let mut tree = tree::Tree::default();
-        tree.set_show_root(false);
-        tree.emit(s, Message::TreeClicked);
-
-        let filename = Path::new(&args[1])
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-
-        let pb: PathBuf = args[1].clone().into();
-
-        let bytes = fs::read(&args[1]).expect("Unable to read.");
-        let new_bnl = BNLFile::from_bytes(&bytes).unwrap();
-
-        let mut node = tree.add(&filename).unwrap();
-
-        node.set_user_data(NodeData {
-            is_root: true,
-            bnl_index: 0,
-        });
-
-        let tree_id = 0;
-
-        let bnl_files = vec![BNLStruct {
-            tree_id,
-            descriptions: None,
-            bnl_file: new_bnl,
-            path: pb,
-        }];
-
-        root.add(&tree);
-        root.fixed(&tree, 350);
-        let edit_window = EditWindow::new(&mut root).expect("Unable to create edit window.");
-
-        root.show();
-        root.end();
-
-        main_win.show();
-        main_win.end();
-
-        Self {
-            app,
-            tree,
-            main_win,
-            edit_window,
-            receiver,
-            bnl_structs: bnl_files,
-            flex: root,
-        }
-    }
-
-    pub fn on_tree_item_clicked(&mut self) -> Result<(), XError> {
-        let node = self.tree.first_selected_item().ok_or(XError::TreeError)?;
-        let node_data: NodeData = unsafe { node.user_data() }.ok_or_else(|| {
-            eprintln!("No node data available.");
-            XError::TreeError
-        })?;
-
-        // If a root node is clicked, ie a BNL file, handle it
-        if node_data.is_root {
-            let bnl_struct = self
-                .bnl_structs
-                .get_mut(node_data.bnl_index)
-                .ok_or(XError::TreeError)?;
-
-            // If the descriptions aren't loaded, load them and put them into the tree
-            if bnl_struct.descriptions.is_none() {
-                bnl_struct
-                    .load_asset_descriptions()?
-                    .iter()
-                    .for_each(|desc| {
-                        let mut new_node = self.tree.insert(&node, desc.name(), i32::MAX).unwrap();
-
-                        new_node.set_user_data(NodeData {
-                            is_root: false,
-                            bnl_index: node_data.bnl_index,
-                        });
-                    });
-            }
-
-            Ok(())
-        } else {
-            let bnl_struct = self
-                .bnl_structs
-                .get_mut(node_data.bnl_index)
-                .ok_or(XError::NodeError)?;
-
-            let asset_name = node.label().unwrap_or_default();
-
-            match bnl_struct
-                .bnl_file
-                .get_raw_asset(&asset_name)
-                .map_err(|_| XError::NodeError)?
-                .asset_type
-            {
-                AssetType::ResTexture => {
-                    if let Ok(tex) = bnl_struct.bnl_file.get_asset::<Texture>(&asset_name) {
-                        self.edit_window.reset_begin();
-                        self.edit_window.add_viewer(tex);
-                        self.edit_window.reset_end();
-                    }
-                }
-                t => {
-                    println!("Type {:?} not implemented yet.", t);
-                }
-            };
-
-            Ok(())
-        }
-    }
-
-    pub fn run(mut self) {
-        while self.app.wait() {
-            if let Some(msg) = self.receiver.recv() {
-                match msg {
-                    Message::TreeClicked => self.on_tree_item_clicked().unwrap_or_else(|e| {
-                        eprintln!("Unable to handle tree click.\nError: {}", e);
-                    }),
-                }
-            }
-        }
-    }
-}
-
-
-// fn main() {
-// let app = AnyXPloreApp::new();
-// app.run();
-// }
-
-
-*/
-
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let native_options = eframe::NativeOptions::default();
+    let native_options = eframe::NativeOptions {
+        ..Default::default()
+    };
     eframe::run_native(
         "My egui App",
         native_options,

@@ -1,9 +1,12 @@
+use std::time::SystemTime;
+
 use bnl::asset::{
     Asset,
+    model::Model,
     texture::{Texture, TextureDescriptor},
 };
 use eframe::egui::{
-    self, ColorImage, ImageSource, TextureHandle, TextureId, Vec2, load::SizedTexture,
+    self, ColorImage, Id, ImageSource, TextureHandle, TextureId, Vec2, load::SizedTexture,
 };
 
 use crate::Message;
@@ -14,19 +17,42 @@ pub enum CreationFailure {
     CompleteFailure(String),
 }
 
+pub struct ViewerContext<'a> {
+    ui: &'a mut egui::Ui,
+    viewer_index: usize,
+}
+
+impl<'a> ViewerContext<'a> {
+    pub fn new(ui: &'a mut egui::Ui) -> ViewerContext<'a> {
+        ViewerContext {
+            ui,
+            viewer_index: 0,
+        }
+    }
+
+    pub fn next_viewer_index(&mut self) -> usize {
+        let index = self.viewer_index;
+        self.viewer_index += 1;
+
+        index
+    }
+}
+
 pub trait Viewable {
-    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure>;
+    fn create_viewer(&self, ui: &mut ViewerContext) -> Result<(), CreationFailure>;
 }
 
 pub trait Editable: Viewable {
-    fn create_editor(&mut self, ui: &mut egui::Ui) -> Result<(), CreationFailure>;
+    fn create_editor(&mut self, ui: &mut ViewerContext) -> Result<(), CreationFailure>;
 }
 
 impl Viewable for TextureDescriptor {
-    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
-        ui.heading("Texture");
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        ctx.ui.heading("Texture");
 
-        egui::Grid::new("some_unique_id").show(ui, |ui| {
+        let index = ctx.next_viewer_index();
+
+        egui::Grid::new(format!("texture_{}", index)).show(ctx.ui, |ui| {
             ui.label("Format");
             ui.label(format!("{:?}", self.format()));
             ui.end_row();
@@ -65,20 +91,22 @@ impl Viewable for TextureDescriptor {
 }
 
 impl Viewable for Texture {
-    fn create_viewer(&self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
-        self.descriptor().create_viewer(ui)?;
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        self.descriptor().create_viewer(ctx)?;
 
         if let Ok(rgba) = self.to_rgba_image() {
             let color_image =
                 ColorImage::from_rgba_unmultiplied([rgba.width(), rgba.height()], rgba.bytes());
 
-            let texture: TextureHandle =
-                ui.ctx()
-                    .load_texture("some texture", color_image, egui::TextureOptions::LINEAR);
+            let texture: TextureHandle = ctx.ui.ctx().load_texture(
+                "some texture",
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
 
-            ui.image(&texture);
+            ctx.ui.image(&texture);
         } else {
-            ui.label("Error creating image view.");
+            ctx.ui.label("Error creating image view.");
         }
 
         Ok(())
@@ -86,10 +114,24 @@ impl Viewable for Texture {
 }
 
 impl Editable for Texture {
-    fn create_editor(&mut self, ui: &mut egui::Ui) -> Result<(), CreationFailure> {
-        self.descriptor().create_viewer(ui)?;
+    fn create_editor(&mut self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        self.descriptor().create_viewer(ctx)?;
 
         // TODO: Make the editor here
+
+        Ok(())
+    }
+}
+
+impl Viewable for Model {
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        let textures = self.textures().ok_or(CreationFailure::CompleteFailure(
+            "No textures available for model.".to_string(),
+        ))?;
+
+        for texture in textures {
+            texture.create_viewer(ctx)?;
+        }
 
         Ok(())
     }

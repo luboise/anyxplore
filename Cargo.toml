@@ -12,3 +12,5 @@ png = "0.17.16"
 bnl = { path = "../ghoulies_reader" }
 eframe = "0.32.1"
 egui_ltreeview = "0.5.3"
+image = "0.25.8"
+egui-file-dialog = "0.11.0"
