@@ -1,4 +1,7 @@
-use std::time::SystemTime;
+use std::{
+    io::{Cursor, Read},
+    time::SystemTime,
+};
 
 use bnl::asset::{
     Asset,
@@ -6,6 +9,7 @@ use bnl::asset::{
     script::{Script, ScriptDescriptor, ScriptParamType},
     texture::{Texture, TextureDescriptor},
 };
+use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui::{
     self, ColorImage, Id, ImageSource, TextureHandle, TextureId, Vec2, load::SizedTexture,
 };
@@ -153,14 +157,75 @@ impl Viewable for ScriptDescriptor {
 
                 let shape = op.get_shape();
 
+                let operand_bytes = op.operand_bytes();
+
+                let mut cur = Cursor::new(operand_bytes);
+
                 for (key, value) in shape {
                     // TODO: Add other cases later
                     match value.param_type() {
                         ScriptParamType::F32 => {
-                            let bytes: [u8; 4] = op.operand_bytes().try_into().unwrap();
-
-                            ui.label(format!("{:.1}", f32::from_le_bytes(bytes)));
+                            let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
+                            ui.label(format!("{:.1}", val)).on_hover_text(key);
                         }
+                        ScriptParamType::F64 => {
+                            let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
+                            ui.label(format!("{:.2}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U8 => {
+                            let val = cur.read_u8().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I8 => {
+                            let val = cur.read_i8().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I16 => {
+                            let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U16 => {
+                            let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I32 => {
+                            let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U32 => {
+                            let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I64 => {
+                            let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U64 => {
+                            let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+
+                        ScriptParamType::Bytes(count) => {
+                            let mut v = vec![0x00; *count];
+                            cur.read_exact(&mut v).unwrap_or_default();
+
+                            let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
+                            ui.label(hex).on_hover_text(key);
+                        }
+                        ScriptParamType::String(size) => {
+                            let mut v = vec![0x00; *size];
+                            cur.read_exact(&mut v).unwrap_or_default();
+
+                            let hex: String = v
+                                .iter()
+                                .take(0x80)
+                                .take_while(|&&b| b != 0x00)
+                                .map(|&b| b as char)
+                                .collect();
+
+                            ui.label(hex).on_hover_text(key);
+                        }
+
                         _ => (),
                     }
                 }
@@ -168,6 +233,108 @@ impl Viewable for ScriptDescriptor {
                 ui.end_row();
             });
         });
+
+        Ok(())
+    }
+}
+
+impl Editable for ScriptDescriptor {
+    fn create_editor(&mut self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        ctx.ui
+            .heading(format!("Script ({} Operations)", self.operations().len()));
+
+        let mut deleted_index = None;
+
+        egui::Grid::new("script_viewer").show(ctx.ui, |ui| {
+            self.operations().iter().enumerate().for_each(|(i, op)| {
+                if ui.button("x").clicked() {
+                    deleted_index = Some(i);
+                }
+
+                ui.label(format!("{:?}", op.opcode()));
+
+                let shape = op.get_shape();
+
+                let operand_bytes = op.operand_bytes();
+
+                let mut cur = Cursor::new(operand_bytes);
+
+                for (key, value) in shape {
+                    // TODO: Add other cases later
+                    match value.param_type() {
+                        ScriptParamType::F32 => {
+                            let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
+                            ui.label(format!("{:.1}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::F64 => {
+                            let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
+                            ui.label(format!("{:.2}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U8 => {
+                            let val = cur.read_u8().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I8 => {
+                            let val = cur.read_i8().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I16 => {
+                            let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U16 => {
+                            let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I32 => {
+                            let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U32 => {
+                            let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::I64 => {
+                            let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+                        ScriptParamType::U64 => {
+                            let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
+                            ui.label(format!("{}", val)).on_hover_text(key);
+                        }
+
+                        ScriptParamType::Bytes(count) => {
+                            let mut v = vec![0x00; *count];
+                            cur.read_exact(&mut v).unwrap_or_default();
+
+                            let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
+                            ui.label(hex).on_hover_text(key);
+                        }
+                        ScriptParamType::String(size) => {
+                            let mut v = vec![0x00; *size];
+                            cur.read_exact(&mut v).unwrap_or_default();
+
+                            let hex: String = v
+                                .iter()
+                                .take(0x80)
+                                .take_while(|&&b| b != 0x00)
+                                .map(|&b| b as char)
+                                .collect();
+
+                            ui.label(hex).on_hover_text(key);
+                        }
+
+                        _ => (),
+                    }
+                }
+
+                ui.end_row();
+            });
+        });
+
+        if let Some(index) = deleted_index {
+            println!("Call to delete index {}", index);
+        }
 
         Ok(())
     }
