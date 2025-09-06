@@ -355,9 +355,28 @@ impl eframe::App for AnyXPloreApp {
                                 */
                             }
                             AssetType::ResScript => {
-                                if let Ok(script) = bnl_file.get_asset::<Script>(&asset_struct.name)
+                                if let Ok(mut script) =
+                                    bnl_file.get_asset::<Script>(&asset_struct.name)
                                 {
-                                    script.create_viewer(&mut viewer_ctx);
+                                    script.create_editor(&mut viewer_ctx);
+
+                                    if let Some(request) = viewer_ctx.delete_request_mut().take() {
+                                        let descriptor = script.descriptor_mut();
+
+                                        descriptor.operations_mut().remove(request.deletion_index);
+
+                                        bnl_file
+                                            .update_asset_from_descriptor(
+                                                &asset_struct.name,
+                                                descriptor,
+                                                None,
+                                            )
+                                            .unwrap_or_else(|e| {
+                                                eprintln!("Unable to update asset: {}", e)
+                                            });
+                                        fs::write(bnl_path, bnl_file.to_bytes())
+                                            .expect("Unable to write");
+                                    }
                                 } else {
                                     viewer_ctx.ui_mut().heading("Error parsing script.");
                                 }

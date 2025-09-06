@@ -1,18 +1,16 @@
-use std::{
-    io::{Cursor, Read},
-    time::SystemTime,
-};
+use std::io::{Cursor, Read};
 
-use bnl::asset::{
-    Asset,
-    model::Model,
-    script::{Script, ScriptDescriptor, ScriptParamType},
-    texture::{Texture, TextureDescriptor},
+use bnl::{
+    asset::{
+        Asset,
+        model::Model,
+        script::{Script, ScriptDescriptor, ScriptParamType},
+        texture::{Texture, TextureDescriptor},
+    },
+    game::AssetType,
 };
 use byteorder::{LittleEndian, ReadBytesExt};
-use eframe::egui::{
-    self, ColorImage, Id, ImageSource, TextureHandle, TextureId, Vec2, load::SizedTexture,
-};
+use eframe::egui::{self, ColorImage, TextureHandle};
 
 use crate::Message;
 
@@ -22,9 +20,17 @@ pub enum CreationFailure {
     CompleteFailure(String),
 }
 
+#[derive(Debug)]
+pub struct DeletionRequest {
+    pub asset_type: AssetType,
+    pub deletion_index: usize,
+}
+
 pub struct ViewerContext<'a> {
     ui: &'a mut egui::Ui,
     viewer_index: usize,
+
+    delete_request: Option<DeletionRequest>,
 }
 
 impl<'a> ViewerContext<'a> {
@@ -32,6 +38,7 @@ impl<'a> ViewerContext<'a> {
         ViewerContext {
             ui,
             viewer_index: 0,
+            delete_request: None,
         }
     }
 
@@ -44,6 +51,10 @@ impl<'a> ViewerContext<'a> {
 
     pub fn ui_mut(&mut self) -> &mut &'a mut egui::Ui {
         &mut self.ui
+    }
+
+    pub fn delete_request_mut(&mut self) -> &mut Option<DeletionRequest> {
+        &mut self.delete_request
     }
 }
 
@@ -238,17 +249,25 @@ impl Viewable for ScriptDescriptor {
     }
 }
 
+impl Editable for Script {
+    fn create_editor(&mut self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        self.descriptor_mut().create_editor(ctx)
+    }
+}
+
 impl Editable for ScriptDescriptor {
     fn create_editor(&mut self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
         ctx.ui
             .heading(format!("Script ({} Operations)", self.operations().len()));
 
-        let mut deleted_index = None;
+        let mut deletion_index = None;
 
         egui::Grid::new("script_viewer").show(ctx.ui, |ui| {
             self.operations().iter().enumerate().for_each(|(i, op)| {
                 if ui.button("x").clicked() {
-                    deleted_index = Some(i);
+                    if deletion_index.is_none() {
+                        deletion_index = Some(i);
+                    }
                 }
 
                 ui.label(format!("{:?}", op.opcode()));
@@ -332,8 +351,15 @@ impl Editable for ScriptDescriptor {
             });
         });
 
-        if let Some(index) = deleted_index {
-            println!("Call to delete index {}", index);
+        if ctx.delete_request.is_none() {
+            if let Some(index) = deletion_index {
+                {
+                    ctx.delete_request = Some(DeletionRequest {
+                        asset_type: AssetType::ResScript,
+                        deletion_index: index,
+                    });
+                }
+            }
         }
 
         Ok(())
