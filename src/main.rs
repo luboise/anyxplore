@@ -360,11 +360,12 @@ impl eframe::App for AnyXPloreApp {
                                 {
                                     script.create_editor(&mut viewer_ctx);
 
+                                    let descriptor = script.descriptor_mut();
                                     if let Some(request) = viewer_ctx.delete_request_mut().take() {
-                                        let descriptor = script.descriptor_mut();
-
                                         descriptor.operations_mut().remove(request.deletion_index);
+                                    }
 
+                                    if viewer_ctx.update_bnl {
                                         bnl_file
                                             .update_asset_from_descriptor(
                                                 &asset_struct.name,
@@ -376,6 +377,8 @@ impl eframe::App for AnyXPloreApp {
                                             });
                                         fs::write(bnl_path, bnl_file.to_bytes())
                                             .expect("Unable to write");
+
+                                        viewer_ctx.update_bnl = false;
                                     }
                                 } else {
                                     viewer_ctx.ui_mut().heading("Error parsing script.");

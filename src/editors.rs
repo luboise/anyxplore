@@ -30,6 +30,8 @@ pub struct ViewerContext<'a> {
     ui: &'a mut egui::Ui,
     viewer_index: usize,
 
+    pub(crate) update_bnl: bool,
+
     delete_request: Option<DeletionRequest>,
 }
 
@@ -39,6 +41,7 @@ impl<'a> ViewerContext<'a> {
             ui,
             viewer_index: 0,
             delete_request: None,
+            update_bnl: false,
         }
     }
 
@@ -263,92 +266,197 @@ impl Editable for ScriptDescriptor {
         let mut deletion_index = None;
 
         egui::Grid::new("script_viewer").show(ctx.ui, |ui| {
-            self.operations().iter().enumerate().for_each(|(i, op)| {
-                if ui.button("x").clicked() {
-                    if deletion_index.is_none() {
-                        deletion_index = Some(i);
+            self.operations_mut()
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, op)| {
+                    if ui.button("x").clicked() {
+                        if deletion_index.is_none() {
+                            deletion_index = Some(i);
+                        }
                     }
-                }
 
-                ui.label(format!("{:?}", op.opcode()));
+                    ui.label(format!("{:?}", op.opcode()));
 
-                let shape = op.get_shape();
+                    let shape = op.get_shape();
 
-                let operand_bytes = op.operand_bytes();
+                    let operand_bytes = op.operand_bytes().to_vec();
 
-                let mut cur = Cursor::new(operand_bytes);
+                    let mut cur = Cursor::new(operand_bytes);
 
-                for (key, value) in shape {
-                    // TODO: Add other cases later
-                    match value.param_type() {
-                        ScriptParamType::F32 => {
-                            let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
-                            ui.label(format!("{:.1}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::F64 => {
-                            let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
-                            ui.label(format!("{:.2}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::U8 => {
-                            let val = cur.read_u8().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::I8 => {
-                            let val = cur.read_i8().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::I16 => {
-                            let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::U16 => {
-                            let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::I32 => {
-                            let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::U32 => {
-                            let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::I64 => {
-                            let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
-                        ScriptParamType::U64 => {
-                            let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
-                            ui.label(format!("{}", val)).on_hover_text(key);
-                        }
+                    for (key, value) in shape {
+                        // TODO: Add other cases later
+                        match value.param_type() {
+                            ScriptParamType::F32 => {
+                                let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
 
-                        ScriptParamType::Bytes(count) => {
-                            let mut v = vec![0x00; *count];
-                            cur.read_exact(&mut v).unwrap_or_default();
+                                let mut text = format!("{:.1}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<f32>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
 
-                            let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
-                            ui.label(hex).on_hover_text(key);
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::F64 => {
+                                let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
+
+                                let mut text = format!("{:.2}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<f64>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::U8 => {
+                                let val = cur.read_u8().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<u8>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::I8 => {
+                                let val = cur.read_i8().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<i8>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::U16 => {
+                                let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<u16>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::I16 => {
+                                let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<i16>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+
+                            ScriptParamType::U32 => {
+                                let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<u32>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::I32 => {
+                                let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<i32>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+
+                            ScriptParamType::U64 => {
+                                let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<u64>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+                            ScriptParamType::I64 => {
+                                let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
+
+                                let mut text = format!("{}", val);
+                                if ui.text_edit_singleline(&mut text).changed() {
+                                    if let Ok(val) = text.parse::<i64>() {
+                                        op.set_param_by_name(&key, val).map_err(|e| {
+                                            CreationFailure::PartialFailure(format!("{:?}", e))
+                                        });
+
+                                        ctx.update_bnl = true;
+                                    }
+                                }
+                            }
+
+                            ScriptParamType::Bytes(count) => {
+                                let mut v = vec![0x00; *count];
+                                cur.read_exact(&mut v).unwrap_or_default();
+
+                                let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
+                                ui.label(hex).on_hover_text(key);
+                            }
+                            ScriptParamType::String(size) => {
+                                let mut v = vec![0x00; *size];
+                                cur.read_exact(&mut v).unwrap_or_default();
+
+                                let hex: String = v
+                                    .iter()
+                                    .take(0x80)
+                                    .take_while(|&&b| b != 0x00)
+                                    .map(|&b| b as char)
+                                    .collect();
+
+                                ui.label(hex).on_hover_text(key);
+                            }
+
+                            _ => (),
                         }
-                        ScriptParamType::String(size) => {
-                            let mut v = vec![0x00; *size];
-                            cur.read_exact(&mut v).unwrap_or_default();
-
-                            let hex: String = v
-                                .iter()
-                                .take(0x80)
-                                .take_while(|&&b| b != 0x00)
-                                .map(|&b| b as char)
-                                .collect();
-
-                            ui.label(hex).on_hover_text(key);
-                        }
-
-                        _ => (),
                     }
-                }
 
-                ui.end_row();
-            });
+                    ui.end_row();
+                });
         });
 
         if ctx.delete_request.is_none() {
