@@ -313,10 +313,20 @@ impl eframe::App for AnyXPloreApp {
                                     );
 
                                     println!("Updating image");
-                                    bnl_file.update_asset(&asset_struct.name, &texture);
 
-                                    fs::write(bnl_path, &bnl_file.to_bytes())
-                                        .expect("Unable to write");
+                                    match bnl_file.update_asset_from_descriptor(
+                                        texture.name(),
+                                        texture.data().descriptor(),
+                                        Some(&texture.data().bytes().to_vec()),
+                                    ) {
+                                        Ok(()) => {
+                                            fs::write(bnl_path, bnl_file.to_bytes())
+                                                .expect("Unable to write");
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to update texture. Error: {}", e);
+                                        }
+                                    };
                                 }
                             }
                             AssetType::ResModel => {

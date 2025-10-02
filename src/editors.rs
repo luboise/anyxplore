@@ -4,8 +4,9 @@ use bnl::{
     asset::{
         Asset,
         model::Model,
-        script::{Script, ScriptDescriptor, ScriptParamType},
-        texture::{Texture, TextureDescriptor},
+        param::{HasParams, ParamType},
+        script::{Script, ScriptDescriptor},
+        texture::{Texture, TextureData, TextureDescriptor},
     },
     game::AssetType,
 };
@@ -113,9 +114,11 @@ impl Viewable for TextureDescriptor {
     }
 }
 
-impl Viewable for Texture {
+impl Viewable for TextureData {
     fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
-        self.descriptor().create_viewer(ctx)?;
+        let descriptor = self.descriptor();
+
+        descriptor.create_viewer(ctx)?;
 
         if let Ok(rgba) = self.to_rgba_image() {
             let color_image =
@@ -133,6 +136,12 @@ impl Viewable for Texture {
         }
 
         Ok(())
+    }
+}
+
+impl Viewable for Texture {
+    fn create_viewer(&self, ctx: &mut ViewerContext) -> Result<(), CreationFailure> {
+        self.data().create_viewer(ctx)
     }
 }
 
@@ -178,55 +187,55 @@ impl Viewable for ScriptDescriptor {
                 for (key, value) in shape {
                     // TODO: Add other cases later
                     match value.param_type() {
-                        ScriptParamType::F32 => {
+                        ParamType::F32 => {
                             let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
                             ui.label(format!("{:.1}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::F64 => {
+                        ParamType::F64 => {
                             let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
                             ui.label(format!("{:.2}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::U8 => {
+                        ParamType::U8 => {
                             let val = cur.read_u8().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::I8 => {
+                        ParamType::I8 => {
                             let val = cur.read_i8().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::I16 => {
+                        ParamType::I16 => {
                             let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::U16 => {
+                        ParamType::U16 => {
                             let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::I32 => {
+                        ParamType::I32 => {
                             let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::U32 => {
+                        ParamType::U32 => {
                             let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::I64 => {
+                        ParamType::I64 => {
                             let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
-                        ScriptParamType::U64 => {
+                        ParamType::U64 => {
                             let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
                             ui.label(format!("{}", val)).on_hover_text(key);
                         }
 
-                        ScriptParamType::Bytes(count) => {
+                        ParamType::Bytes(count) => {
                             let mut v = vec![0x00; *count];
                             cur.read_exact(&mut v).unwrap_or_default();
 
                             let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
                             ui.label(hex).on_hover_text(key);
                         }
-                        ScriptParamType::String(size) => {
+                        ParamType::String(size) => {
                             let mut v = vec![0x00; *size];
                             cur.read_exact(&mut v).unwrap_or_default();
 
@@ -287,7 +296,7 @@ impl Editable for ScriptDescriptor {
                     for (key, value) in shape {
                         // TODO: Add other cases later
                         match value.param_type() {
-                            ScriptParamType::F32 => {
+                            ParamType::F32 => {
                                 let val = cur.read_f32::<LittleEndian>().unwrap_or(0.0);
 
                                 let mut text = format!("{:.1}", val);
@@ -301,7 +310,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::F64 => {
+                            ParamType::F64 => {
                                 let val = cur.read_f64::<LittleEndian>().unwrap_or(0.0);
 
                                 let mut text = format!("{:.2}", val);
@@ -315,7 +324,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::U8 => {
+                            ParamType::U8 => {
                                 let val = cur.read_u8().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -329,7 +338,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::I8 => {
+                            ParamType::I8 => {
                                 let val = cur.read_i8().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -343,7 +352,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::U16 => {
+                            ParamType::U16 => {
                                 let val = cur.read_u16::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -357,7 +366,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::I16 => {
+                            ParamType::I16 => {
                                 let val = cur.read_i16::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -372,7 +381,7 @@ impl Editable for ScriptDescriptor {
                                 }
                             }
 
-                            ScriptParamType::U32 => {
+                            ParamType::U32 => {
                                 let val = cur.read_u32::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -386,7 +395,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::I32 => {
+                            ParamType::I32 => {
                                 let val = cur.read_i32::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -401,7 +410,7 @@ impl Editable for ScriptDescriptor {
                                 }
                             }
 
-                            ScriptParamType::U64 => {
+                            ParamType::U64 => {
                                 let val = cur.read_u64::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -415,7 +424,7 @@ impl Editable for ScriptDescriptor {
                                     }
                                 }
                             }
-                            ScriptParamType::I64 => {
+                            ParamType::I64 => {
                                 let val = cur.read_i64::<LittleEndian>().unwrap_or(0);
 
                                 let mut text = format!("{}", val);
@@ -430,14 +439,14 @@ impl Editable for ScriptDescriptor {
                                 }
                             }
 
-                            ScriptParamType::Bytes(count) => {
+                            ParamType::Bytes(count) => {
                                 let mut v = vec![0x00; *count];
                                 cur.read_exact(&mut v).unwrap_or_default();
 
                                 let hex: String = v.iter().map(|b| format!("{:02x}", b)).collect();
                                 ui.label(hex).on_hover_text(key);
                             }
-                            ScriptParamType::String(size) => {
+                            ParamType::String(size) => {
                                 let mut v = vec![0x00; *size];
                                 cur.read_exact(&mut v).unwrap_or_default();
 
